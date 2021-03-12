@@ -1,0 +1,23 @@
+--[[
+TODO(tullisar) HEADER
+]]
+
+local Tables = {}
+do
+
+  --[[
+  TODO(tullisar): STUB
+  ]]
+  function Tables.Pop()
+    return {}
+  end
+
+  --[[
+  TODO(tullisar): STUB
+  ]]
+  function Tables.Push(table)
+    -- Do nothing for now
+    return
+  end
+
+end

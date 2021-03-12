@@ -1,0 +1,60 @@
+--[[
+TODO(tullisar) HEADER
+]]
+
+do
+  local Structs = {}
+end
+
+function Structs.InstallToLibrary(Library)
+
+  -- Set up the module definition
+  local Tables = Library.Require("Tables")
+  local Metatable = {}
+  local Module = setmetatable({}, Metatable)
+
+  --[[
+  Returns a new instance of a the given struct type.
+  ]]
+  function Metatable.NewInstanceOfType(type, ...)
+    local instance = Tables.Pop()
+    setmetatable(instance, type)
+    instance:New(...)
+    return instance
+  end
+
+  --[[
+  New metatable function
+  ]]
+  function Metatable.NewMetatableForType(type)
+    local metatable = {}
+    metatable.__call = Metatable.NewInstanceOfType
+    return metatable
+  end
+
+  --[[
+  Returns a new "struct" type.
+  ]]
+  function Metatable.NewType(_, ...)
+    local type = {}
+    type.__index = type
+    type.__gc = Tables.Push
+    setmetatable(structType, __newTypeMetatable(structType))
+    return structType
+  end
+
+  -- Define the metatable the "Struct" table will use.
+  local metatable = {}
+
+  --[[
+  Allows the "Struct" table to be called as a function.
+  ]]
+  function metatable.__call(table, ...)
+    return __new(table, ...)
+  end
+
+  -- Set the metatable for the "Struct" functor, and disallow modifications.
+  metatable.__newIndex = Library.NewIndexNotAllowed
+  setmetatable(Struct, metatable)
+
+end

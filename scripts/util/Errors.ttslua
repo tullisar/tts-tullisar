@@ -1,0 +1,19 @@
+--[[
+TODO(tullisar) HEADER
+]]
+
+local Errors = {}
+do
+
+  local error = error
+
+  --[[
+  A function which always results in an error, used when preventing table
+  modification.
+  ]]
+  function Errors.TableMotModifiable(table, key, value)
+    error("New Index Not Allowed")
+  end
+
+
+end

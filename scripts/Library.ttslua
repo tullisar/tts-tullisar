@@ -1,0 +1,63 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module Library.ttslua
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+local error = _G.error
+
+-- Ensure LibStub is available.
+local function __requireLibStub()
+  local LibStub = _G.LibStub
+  if (not LibStub) then error("LibStub is required") end
+end
+
+local LIB_TTS_TULLISAR_MAJOR = "lib-tts-tullisar-0.1"
+local LIB_TTS_TULLISAR_MINOR = 0
+local LIB_TTS_TULLISAR_ROOT_PACKAGE = "tul"
+local LIB_TTS_TULLISAR_ROOT_PACKAGE_VERSION = 0
+local DEBUG = false
+
+-- Attempt to create the library. If it has already been created and the
+-- existing minor version is the same or newer, no installation is
+-- needed.
+local stub, previous = LibStub:NewLibrary(LIB_TTS_TULLISAR_MAJOR, LIB_TTS_TULLISAR_MINOR, DEBUG)
+if (not stub) then
+  return LibStub(LIB_TTS_TULLISAR_MAJOR)
+end
+
+-- =============================================================================
+-- Local Lua API Aliases
+-- =============================================================================
+local type, pairs, table, string = _G.type, _G.pairs, _G.table, _G.string
+local assert, error, xpcall, select = _G.assert, _G.error, _G.xpcall, _G.select
+local setmetatable, getmetatable = _G.setmetatable, _G.getmetatable
+
+-- =============================================================================
+-- Library Definition
+-- =============================================================================
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@type LibTullisar
+--]]
+local LibTullisar = {}
+LibTullisar.__index = LibTullisar
+setmetatable(stub, LibTullisar)
+
+------------------------------------------------------------------------------
+-- Library Management
+------------------------------------------------------------------------------
+
+-- On object load, automatically attempt to re-install the library.
+function onLoad(saveState)
+  __requireLibStub()
+  self.addContextMenuItem("Reinstall Library", ReinstallLibrary, false)
+end

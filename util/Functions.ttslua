@@ -1,0 +1,34 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+local Functions = {}
+
+--[[--
+Returns true if the given argument is callable.
+@function Functions.isCallable
+--]]
+function Functions:isCallable(callable)
+  if (type(callable) == "function") then return true end
+  if (type(callable) == "table") then return (getmetatable(callable).__call ~= nil) end
+  return false
+end
+
+--[[--
+Ensure that the given value is callable.
+@function Futures.checkisCallable
+@tparam function|table
+--]]
+function Functions:assertIsCallable(callable, ...)
+  assert(Functions:isCallable(callable), ...)
+  return callable
+end
+
+return Functions

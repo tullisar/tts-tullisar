@@ -1,27 +1,27 @@
---[[
-TODO(tullisar) HEADER
-]]
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
 
-do
-  local Structs = {}
-end
+local Struct = {}
 
-function Structs.InstallToLibrary(Library)
-
-  -- Set up the module definition
-  local Tables = Library.Require("Tables")
-  local Metatable = {}
-  local Module = setmetatable({}, Metatable)
+local Metatable = {}
 
   --[[
   Returns a new instance of a the given struct type.
   ]]
-  function Metatable.NewInstanceOfType(type, ...)
-    local instance = Tables.Pop()
-    setmetatable(instance, type)
-    instance:New(...)
-    return instance
-  end
+function Metatable.NewInstanceOfType(type, ...)
+  local instance = Tables.Pop()
+  setmetatable(instance, type)
+  instance:New(...)
+  return instance
+end
 
   --[[
   New metatable function

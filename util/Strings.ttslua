@@ -1,0 +1,107 @@
+--[[--
+String utility functions.
+@module Strings.ttslua
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+local Strings = {}
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function <function>
+--]]
+function Strings:isString(str)
+  return (type(str) == "string")
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function Strings:assertIsString
+--]]
+function Strings:assertIsString(str, ...)
+  return assert(Strings:isString(str), ...)
+end
+
+--[[--
+Iterates over all the lines in the given string, performing a given action.
+@function Strings:forEachLine
+@string str the string over which to terate lines.
+@tparam func action a consumer to be passed each line of the string.
+@tparam func? stop a predicate which will be passed the line after passing it
+to the consumer. If the predicate returns true, iteration will stop.
+--]]
+function Strings:forEachLine(str, action, stop)
+  self:assertIsString(str)
+  assert(type(action) == "function")
+  assert((stop == nil) or (type(stop) == "function"))
+  for line in str:gmatch("([^\r\n]*)\r?\n?") do
+    action(line)
+  end
+  if (stop and stop(line)) then return end
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function <function>
+--]]
+function Strings:splitLines(str)
+  self:assertIsString(str)
+  local lines = {}
+  local i = 1
+  self:forEachLine(str,
+    function(line)
+      lines[i] = line
+      i = i + 1
+    end
+  )
+end
+
+--[[--
+Trims a string of leading and trailing whitespace.
+@TODO(tullisar): This could be unsafe for use with large or non ASCII strings.
+@function <function>
+--]]
+function Strings:trim(str)
+  self:assertIsString(str)
+  str = str:gsub("^%s*", "")
+  str = str:gsub("%s*$", "")
+  return str
+end
+
+--[[--
+Returns true if the given string is empty or is only composed of whitespace
+characters, as defined by the %s pattern match.
+@function Strings:isBlank
+--]]
+function Strings:isBlank(str)
+  self:assertIsString(str)
+  return ((str == "") or (str:match("^%s+$") ~= nil))
+end
+
+--[[--
+Installs functions in this module that are suitable for being called with the
+"string:method()" idiom. This generally applies to functions which accept
+a string as the first argument with the intent to do some operation on that
+string.
+@function String.globalize()
+--]]
+function Strings:globalize()
+  _G.string.isString       = |str| Strings:isString(str)
+  _G.string.assertIsString = |str| Strings:assertIsString(str)
+  _G.string.forEachLine    = |str,action,stop| Strings:forEachLine(str,action,stop)
+  _G.string.splitLines     = |str| Strings:splitLines(str)
+  _G.string.trim           = |str| Strings:trim(str)
+  _G.string.isBlank        = |str| Strings:isBlank(str)
+  return self --
+end
+
+return Strings

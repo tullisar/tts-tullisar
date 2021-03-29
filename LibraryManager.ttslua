@@ -1,0 +1,587 @@
+--[[--
+Tabletop Simulator Library Manager
+@TODO(tullisar)
+@module LibraryManager
+@revision 1.0
+@license Apache 2.0
+--]]
+
+-- =============================================================================
+-- Module wide constants
+-- =============================================================================
+
+-- Value used for the Global script's GUID. We use this rather than rely on
+-- the undocumented behavior that the global script's GUID is always -1.
+local __GLOBAL_GUID = "Global"
+
+-- Constants used for LibraryManager status
+local __STATUS =
+{
+  INSTALL =
+  {
+    UNKNOWN     = -1,
+    PENDING     = 0,
+    READY       = 1,
+    WAITING     = 2,
+    IN_PROGRESS = 3,
+    SUCCESS     = 4,
+    FAILED      = 5,
+  }
+}
+
+--------------------------------------------------------------------------------
+-- __ERRORS
+-- This table describes possible error codes and detail message format strings.
+--------------------------------------------------------------------------------
+local __ERRORS = {
+
+  ALREADY_INSTALLED   = {
+    CODE   = 0,
+    FORMAT = "Failed: Target already has library with version %s.",
+    TYPE   = "WARNING",
+  },
+
+  INSTALL_IN_PROGRESS = {
+    CODE   = 1,
+    FORMAT = "Failed: %s is already being installed on the target.",
+    TYPE   = "ERROR",
+  },
+
+  OBJECT_SCRIPT_ERROR = {
+    CODE   = 2,
+    FORMAT = "Failed: There was an error while executing the library object script. Details:\n%s",
+    TYPE   = "ERROR",
+  }
+}
+
+--------------------------------------------------------------------------------
+-- Library Manager Configuration
+--------------------------------------------------------------------------------
+local __TTS_LIBRARY_MANAGER_CONFIG =
+{
+  NAME            = "Tabletop Simulator Library Manager",
+  SHORT_NAME      = "Library Manager",
+  INSTALL_KEY     = "LibraryManager",
+  VERSION         = { 1, 0, 0 },
+  VERSION_STRING  = "1.0.0",
+  RELEASE         = 0,
+  TARGET_GUID     = __GLOBAL_GUID,
+  SOURCE_GUID     = (((self ~= Global) and self.guid) or nil),
+  DEBUG           = true,
+}
+
+-- =============================================================================
+-- Common Initialization
+-- Functions and data relevant to all objects on which this script is running.
+-- =============================================================================
+
+--------------------------------------------------------------------------------
+-- Load Dependencies
+--------------------------------------------------------------------------------
+
+-- Require the logger package, and instantiate a new one for the library manager.
+local Logger = require("tts-tullisar.util.Logger")(__TTS_LIBRARY_MANAGER_CONFIG.INSTALL_KEY)
+Logger:debug(string.format("Executing LibraryManager script on %s...", ((self == Global) and __GLOBAL_GUID) or self.guid))
+Logger.minimumLevel = Logger.levels.__TRACE
+
+-- Capture the luabundler state for this file
+local BundleData = require("tts-tullisar.util.BundleData")
+
+------------------------------------------------------------------------------
+-- __onError
+-- Finishes installation on the target defined in the given prototype library
+-- manager data table.
+------------------------------------------------------------------------------
+local function __onError(__LibraryManager, message)
+  Logger:error("Unexpected errror:")
+  Logger:error(message)
+end
+
+--------------------------------------------------------------------------------
+-- __newLibraryManager
+-- Returns a new prototype library manager instance.
+-- @TODO(tullisar): Use a "struct" type.
+--------------------------------------------------------------------------------
+local function __new(properties, reinstall, placeholder)
+  assert((type(properties) == "table") or (properties == nil))
+  local config = {}
+  for k,v in pairs(properties or __TTS_LIBRARY_MANAGER_CONFIG) do config[k] = v end
+  local __LibraryManager =
+  {
+    REINSTALL = reinstall or nil,
+    CONFIG    = config,
+    STATUS    = { INSTALL = __STATUS.INSTALL.PENDING },
+  }
+  Logger:trace("Configuration:")
+  Logger:trace(__LibraryManager)
+
+  if (not placeholder) then
+    __LibraryManager.__onError = __onError
+  end
+
+  return __LibraryManager
+end
+
+--------------------------------------------------------------------------------
+-- __installStatus
+-- Returns the installation status of the given library manager.
+--------------------------------------------------------------------------------
+local function __installStatus(__LibraryManager)
+  return __LibraryManager.STATUS.INSTALL
+end
+
+--------------------------------------------------------------------------------
+-- __isComplete
+-- Retunrs whether the given library manager's installation has finished,
+-- ether successfuly or failed.
+--------------------------------------------------------------------------------
+local function __isInstallationComplete(__LibraryManager)
+  local status = __installStatus(__LibraryManager)
+  return ((status == __STATUS.INSTALL.SUCCESS) or (status == __STATUS.INSTALL.FAILED))
+end
+
+-- Get or create the library manager instance for the current object.
+Logger:trace("Reading configuration.")
+local LibraryManager = (_G[__TTS_LIBRARY_MANAGER_CONFIG.INSTALL_KEY] or __new())
+local __CONFIG = LibraryManager.CONFIG
+
+--------------------------------------------------------------------------------
+-- __checkTarget
+-- Determine the current target object.
+--
+-- TODO(tullisar): Allow a different target other than Global?
+--------------------------------------------------------------------------------
+local function __checkTarget()
+  local target = Global
+  assert((__CONFIG.TARGET_GUID == __GLOBAL_GUID), "Only global supported at this time.")
+  return target
+end
+local target = __checkTarget()
+
+--------------------------------------------------------------------------------
+-- __checkSource
+-- Determine the current target object.
+--
+-- TODO(tullisar): Allow a different source other than an object?
+--------------------------------------------------------------------------------
+local function __checkSource()
+  source = getObjectFromGUID(__CONFIG.SOURCE_GUID)
+  assert((source ~= nil), "Source object does not exist.")
+  return source
+end
+local source = __checkSource()
+
+-- =============================================================================
+-- Source Object Initialization
+-- Functions relevant only to the script's source object.
+-- =============================================================================
+if (self == source) then
+
+  -- Ensure targeting self isn't supported yet. This will require updates when
+  -- adding support.
+  -- @TODO(tullisar):
+  assert(self ~= target)
+
+  -----------------------------------------------------------------------------
+  -- __setupSourceObject
+  -- Sets up functions specific to the source object.
+  ------------------------------------------------------------------------------
+  local function __sourceSetup(__LibraryManager)
+
+      --[[--
+      Allows toggling the interactability of the source object.
+      @function toggleInteractability
+      --]]
+      function toggleInteractability()
+        self.interactable = (not self.interactable)
+      end
+      self.addContextMenuItem("Make Non-Interactable", toggleInteractability, false)
+
+      --[[--
+      Forces installation of the library manager, even if it is already installed.
+      This will force a reload of every object.
+      @function <function>
+      --]]
+      function reinstall()
+        __LibraryManager:install(nil, true)
+      end
+      self.addContextMenuItem("Reinstall", reinstall, false);
+
+  end
+
+  local function __onComplete(success, result, details, onComplete)
+
+    if (not success) then
+      Logger:error("Failed: %s.", ((not s1) and tostring(s2)) or tostring(result))
+    else
+      Logger:info("Installation was successful.")
+    end
+
+    -- If an onComplete callback was given, excute that now.
+    if (onComplete) then
+      __TargetLibraryManager = target.getTable(__CONFIG.INSTALL_KEY)
+      onComplete(__TargetLibraryManager, success, result)
+    end
+
+    -- Finish the source object's setup (not the placeholder table for the)
+    -- target installation.
+    __sourceSetup(__LibraryManager)
+  end
+
+  ------------------------------------------------------------------------------
+  -- __finish
+  -- Finishes installation of the given library manager on the target object.
+  -- @TODO(tullisar): __finishLater could be merged, or when targeting other
+  -- objects is supported, this function can delegate to a different function.
+  ------------------------------------------------------------------------------
+  local function __finish(__LibraryManager, __TargetLibraryManager, onComplete)
+
+      -- Install the placeholder table and execute this script on the target
+    -- object in a protected call to catch errors.
+    Logger:info("Preparing target for installation.")
+    __TargetLibraryManager.STATUS.INSTALL = __STATUS.INSTALL.WAITING
+    target.setTable(__CONFIG.INSTALL_KEY, __TargetLibraryManager)
+    local timer = __executeSafely(self, target, |s,r,d| __onComplete(s,r,d,onComplete))
+  end
+
+  ------------------------------------------------------------------------------
+  -- __install
+  -- Installs the library manageron the the target object.
+  ------------------------------------------------------------------------------
+  local function __install(__LibraryManager, onComplete, reinstall)
+
+    -- Check some preconditions
+    assert((type(onComplete) == "function") or (onComplete == nil), "Must be nil or a function.")
+    reinstall = (reinstall == true)
+    Logger:info(((reinstall and "Reinstalling") or "Installing") .. " version %s...", __CONFIG.VERSION_STRING)
+    Logger:info("Source: %s | Destination: %s.", __CONFIG.SOURCE_GUID, __CONFIG.TARGET_GUID)
+
+    -- Check to see if the target already has the library manager table
+    -- installed. Unless reinstall is true, the installation wil fail.
+    local __TargetLibraryManager = target.getTable(__CONFIG.INSTALL_KEY)
+    if (__TargetLibraryManager and (not reinstall)) then
+      local message = string.format("Version %s is already installed on %s.", __CONFIG.VERSION_STRING, __CONFIG.TARGET_GUID)
+      Logger:error(message)
+      onComplete(__LibraryManager, false, message)
+      return nil
+    end
+
+    -- Create a new library manager table where everything will be installed
+    -- on the target object.
+    __TargetLibraryManager = __new(__CONFIG, reinstall, true)
+    __TargetLibraryManager.STATUS.INSTALL = __STATUS.INSTALL.READY
+    return __finish(__LibraryManager, __TargetLibraryManager, onComplete)
+
+  end
+
+  LibraryManager.install = __install
+  return LibraryManager
+
+end
+
+-- =============================================================================
+-- Target Object Initialization
+-- Functions relevant only to the script's source object.
+-- =============================================================================
+
+-- @TODO(tullisar): Ensure this is updated when support is added for other
+-- objects.
+assert(self == target)
+
+Logger:info("Installing...")
+Logger:trace("Initializing private tables...")
+--------------------------------------------------------------------------------
+-- Local Utility Functions
+--------------------------------------------------------------------------------
+local function immutable()
+  error("This table is immutable.")
+end
+
+-- LibraryManager metatable setup.
+local __METATABLE = {}
+setmetatable(LibraryManager, __METATABLE)
+
+--------------------------------------------------------------------------------
+-- __PRIVATE
+-- This table is not exposed, and is only visible to the library manager
+-- functions that are defined below.
+--------------------------------------------------------------------------------
+local __PRIVATE = {}
+
+--------------------------------------------------------------------------------
+-- __GLOBAL
+-- This table is used to expose some functions of the LibraryManager to other
+-- scripts. A function will specify in its header if it is exposed for calling.
+-- Exposed functions can be called with:
+-- Global.call("LibraryManager", "functionName", ...)
+--------------------------------------------------------------------------------
+local __GLOBAL = {}
+
+-- =============================================================================
+-- Constants
+-- =============================================================================
+Logger:trace("Initializing constants...")
+
+-- TBD
+
+-- =============================================================================
+-- LibraryManager Public API
+-- =============================================================================
+Logger:trace("Initializing public API...")
+
+--[[--
+Logs an error with the given reason, and returns formatted details as needed.
+Exposed with "Global.call("LibraryManager", "error", reason, ...)"
+@function LibraryManager:error
+--]]
+Logger:trace("->LibraryManager:logger")
+function LibraryManager:logger()
+  return Logger
+end
+
+--[[--
+Logs an error with the given reason, and returns formatted details as needed.
+Exposed with "Global.call("LibraryManager", "error", reason, ...)"
+@function LibraryManager:error
+--]]
+Logger:trace("->LibraryManager:error")
+function LibraryManager:error(reason, ...)
+  local errorData = assert(__ERRORS[reason])
+  local message = string.format(errorData.FORMAT, ...)
+  Logger:error(message)
+  return errorData.CODE, message
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+Exposed with "Global.call("LibraryManager", "get", name, version )
+@function __LibraryManager:get
+--]]
+Logger:trace("->LibraryManager:get")
+function LibraryManager:get(name, version)
+  -- TODO(tullisar): Allow versions that are x.y.z
+  local current = self.libraries[name]
+  if (not current) then
+    return nil, nil, nil
+  else
+    return current, ((current.VERSION >= version) or current.VERSION), current.INSTALL_IN_PROGRESS
+  end
+end
+
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function __LibraryManager:check
+--]]
+Logger:trace("->LibraryManager:check")
+function LibraryManager:check(name, version)
+  -- Ensure a library installation isn't already in progress.
+  local current, compatible, isInProgress = self:get(name, version)
+  if (current and isInProgress) then
+    self:error(__ERROR_CODES.INSTALL_IN_PROGRESS, name)
+  elseif (current and (compatible ~= true)) then
+    self:error(__ERROR_CODES.ALREADY_INSTALLED, tostring(compatible))
+  elseif (current) then
+    return current
+  end
+  return false
+end
+
+
+--[[--
+Returns a new library instance with the provided details.
+@function __LibraryManager:__newLibrary
+--]]
+Logger:trace("->LibraryManager:__newLibrary")
+function LibraryManager:__newLibrary(prototype, properties)
+
+  local library = {
+    NAME           = properties.NAME,
+    VERSION        = properties.VERSION,
+    GUID           = properties.GUID,
+    SOURCE_GUID    = properties.SOURCE_GUID,
+    LIB            = {},
+  }
+
+  -- Create a wrapper for the library's functions as needed. If a prototype is
+  -- provided, then the wrapper will refer to the prototype where applicable,
+  -- and the wrapper will not allow properties that exist in the prototype to
+  -- be set.
+  local public = library.LIB
+  if (prototype) then
+    setmetatable(wrapper, {
+      __index    = prototype,
+      __newIndex = function(t,k,v)
+        if (prototype[k] ~= nil) then
+          immutable()
+        else
+          t[k] = v
+        end
+      end
+    })
+  end
+
+  -- Set the library's metatable so that it will refer to the wrapper where
+  -- applicable when looking up indices.
+  setmetatable(library, {
+    __index = public,
+    __newIndex = function(_,k,v) public[k] = v end,
+  })
+
+  return library
+
+end
+
+--[[--
+Registers a given prototype table as a new library with the given properties.
+@function __LibraryManager:__register
+--]]
+Logger:trace("->LibraryManager:__register")
+function LibraryManager:__register(prototype, properties)
+  assert(prototype)
+  assert(properties)
+  self.libraries[properties.NAME] = self:__newLibrary(prototype, properties)
+  return true
+end
+
+__SCRIPTS = {}
+
+--------------------------------------------------------------------------------
+-- INSTALL_LOCAL_MANAGER
+-- Initialize the object's local library manager table for facilitating access
+-- to the global LibraryManager.
+--------------------------------------------------------------------------------
+__SCRIPTS.__INSTALL_COMMON_MANAGER_FUNCTIONS =
+[[
+do
+
+  local Logger = LibraryManager:logger()
+
+  ------------------------------------------------------------------------------
+  -- TODO(tullisar)
+  -- @function __LibraryManager:__install
+  ------------------------------------------------------------------------------
+  Logger:trace("->LibraryManager:__install")
+  function LibraryManager:__install(loader, properties)
+    Logger:info("Attempting to install " .. properties.NAME .. "-" .. tostring(properties.VERSION) .. "...");
+    Logger:info("Destination: " .. properties.GUID);
+    local success, prototype = pcall(|| loader(properties));
+    if (success) then
+      return self:register(prototype, properties);
+    else
+      self:error(self.__ERROR_CODES.OBJECT_SCRIPT_ERROR, tostring(prototype));
+      return false;
+    end
+  end
+
+end
+]]
+
+-- Install
+Logger:trace("Installing common functions...")
+local function __installCommon()
+  local success, message = pcall(|| self.executeScript(__SCRIPTS.__INSTALL_COMMON_MANAGER_FUNCTIONS))
+  assert(success, "Unexpected error installing common library functions:\n" .. tostring(message))
+end
+__installCommon()
+
+--------------------------------------------------------------------------------
+-- INSTALL_LOCAL_MANAGER
+-- Initialize the object's local library manager table for facilitating access
+-- to the global LibraryManager.
+--------------------------------------------------------------------------------
+__SCRIPTS.INSTALL_LOCAL_MANAGER =
+[[
+do
+  if (not _G.__LibraryManager) then
+    local assert, tostring, type = _G.assert, _G.tostring, _G.type;
+    local __LibraryManager =
+    {
+      guid          = self.guid,
+      libraries     = {},
+      log           = |_,m,t| Global.call("LibraryManager", "log", m, t),
+      __ERROR_CODES = Global.call("LibraryManager", "ERRORS"),
+      SETUP         = true,
+    };
+    _G.__LibraryManager = __LibraryManager
+    return false
+  end
+  return true
+end
+]]
+
+--------------------------------------------------------------------------------
+-- INSTALL
+-- This script template requires 1 argument to string.format, which should be
+-- a string containing the object's LUA script.
+--------------------------------------------------------------------------------
+__SCRIPTS.GET_LOADER =
+[[
+do
+  ------------------------------------------------------------------------------
+  -- Environment Setup
+  ------------------------------------------------------------------------------
+  local assert, error = _G.assert, _G.error;
+  local tostring, tonumber = _G.tostring, _G.tonumber;
+  local setmetatable, getmetatable, type = _G.setmetatable, _G.getmetatable _G.type;
+
+  ------------------------------------------------------------------------------
+  -- __load
+  -- This function is populated with the body of the source object's LUA script,
+  -- and will have available the __LibraryManager global, and the __PROPERTIES
+  -- local environment variable.
+  ------------------------------------------------------------------------------
+  local function __load(__PROPERTIES)
+    do
+    (%s);
+    end
+  end
+
+  return __load;
+
+end
+]]
+
+--------------------------------------------------------------------------------
+-- __LibraryObject
+-- Exposed with Global.call("LibraryManager", "registerLibraryObject", ...)
+--------------------------------------------------------------------------------
+Logger:trace("->LibraryManager:__registerLibraryObject")
+function LibraryManager:registerLibraryObject(name, version, guid)
+
+  -- Ensure a library installation isn't already in progress.
+  local current = self:check(name, version)
+  if (not current) then
+    self.libraries[name] = { INSTALL_IN_PROGRESS = true }
+    current = self.libraries[name]
+  else
+    return false
+  end
+
+  -- Ensure that the object with the library script is available.
+  local object = assert(getObjectFromGUID(guid), string.format("Object '%s' is not available.", tostring(guid)))
+  current.GUID        = "Global"
+  current.NAME        = name
+  current.VERSION     = version
+  current.SOURCE_GUID = guid
+
+  -- Execute the script and install it
+  -- @TODO(tullisar): Sanitize/verify/etc....?
+  local script = string.format(__SCRIPTS.GET_LOADER, object.getLuaScript())
+  local success, loader = pcall(self.executeScript, script)
+  if (not success) then
+    return false
+  end
+
+  return self:__install(loader, current)
+
+end
+--------------------------------------------------------------------------------
+-- Finalize everything.
+--------------------------------------------------------------------------------
+Logger:info("Complete.") --
+return LibraryManager

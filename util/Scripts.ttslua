@@ -1,0 +1,528 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+--------------------------------------------------------------------------------
+-- Constants
+--------------------------------------------------------------------------------
+local __GLOBAL_GUID = "Global"
+
+--------------------------------------------------------------------------------
+-- Dependencies
+--------------------------------------------------------------------------------
+local Logger  = require("tts-tullisar.util.Logger")("Scripts")
+local Strings = require("tts-tullisar.util.Strings"):globalize()
+local Tables  = require("tts-tullisar.util.Tables"):globalize()
+local Futures = require("tts-tullisar.util.Futures")
+
+--------------------------------------------------------------------------------
+-- Common Initialization
+--------------------------------------------------------------------------------
+local Scripts = {}
+
+------------------------------------------------------------------------------
+-- __toString
+-- Returns a string representing the given value. If the value isn't a string,
+-- then the type of the value is returned, or if noType is specified, an empty
+-- string is returned.
+------------------------------------------------------------------------------
+local function __toString(value, noType)
+  local type = type(value)
+  return (((type == "string") and value:trim()) or ((not noType) and type) or "")
+end
+
+------------------------------------------------------------------------------
+-- __toObject
+-- Returns an object reference based on the given parameter. If the parameter
+-- is a GUID for a valid object, return that object. If the parameter is an
+-- object reference, return it. Otherwise, return nil. This routine attempts
+-- to take some shortcuts for references to Global or the value of "self" in
+-- the current context.
+------------------------------------------------------------------------------
+local __GLOBAL, __GUID_LENGTH = _G.Global, 6
+function __toObject(value)
+
+  -- Check to see if the object is the Global object first.
+  Logger:trace("Checking if '%s' is a valid object...", __toString(value))
+  if (value == __GLOBAL) then
+    Logger:trace("Global object found.")
+    return __GLOBAL
+  end
+
+  -- Check to see if the value has a "guid" field or is a string.
+  Logger:trace("Checking for GUID string object field...")
+  local hasGuid, guid = xpcall(|| assert((type(value.guid) == "string") and value.guid), __toString)
+  if (not hasGuid) then
+    Logger:trace("GUID string field not found. Checking for GUID string...")
+    guid = ((xpcall(|| assert((type(value) == "string") and value), __toString) and value) or nil)
+  end
+
+  -- If there is a guid string and it's the expected length, look up an object
+  -- by the guid. Match the object against the value if the GUID was sourced
+  -- from a field of the value.
+  if (guid and (string.len(guid) == __GUID_LENGTH)) then
+    Logger:trace("GUID string string found. Checking object reference...")
+    local object = getObjectFromGUID(object)
+    if (hasGuid) then
+      object = (((object == value) and object) or nil)
+    end
+    if (object) then
+      Logger:trace("Object found.")
+      return object, object.guid
+    end
+  end
+
+  -- No match
+  Logger:trace("Object not found.")
+  return nil, nil
+
+end
+
+--------------------------------------------------------------------------------
+-- __sanitize
+-- Sanitizes the given script before it can be executed. Returns nil if the
+-- script can't be sanitized. For now, all this does is ensure that the value
+-- is a string and isn't empty or blank, and trims any whitespace from the
+-- beginning and end of the script.
+--
+-- @TODO(tullisar): Research additional methods of sanitizing scripts.
+--------------------------------------------------------------------------------
+local __SCRIPT_SIZE_WARN = 0xFFFF
+local function __sanitize(script)
+
+  -- Ensure script is actually a string.
+  Logger:trace("Sanitizing script...")
+  if (type(script) ~= "string") then
+    local message = "Value is unsupported type: " .. type(script)
+    Logger:trace(message)
+    return nil, message
+  end
+
+  -- Ensure script isn't an empty string.
+  if (script:isEmptyOrBlank()) then
+    local message = "Script is empty or blank."
+    Logger:trace(message)
+    return nil, message
+  end
+
+  -- Warn if a string is over 65KiB.
+  local length = script:len()
+  if (length >= __SCRIPT_SIZE_WARN) then
+    Logger:warn("Script size is " .. tostring(length))
+  end
+
+  Logger:trace("Trimming whitespace from script.")
+  script = script:trim()
+  Logger:trace("Script sanitized successfully.")
+  return script, nil
+
+end
+
+--------------------------------------------------------------------------------
+-- __source
+-- @TODO(tullisar)
+--------------------------------------------------------------------------------
+local function __source(source)
+
+  -- Get object script if the script source is an object.
+  Logger:trace("Determining script source...", type(source))
+  local object, guid = __toObject(source)
+  if (object) then
+    Logger:trace("Verifying object script on '%s'...", guid)
+    local script, details = __sanitize(object.script_code)
+    if (not script) then
+      Logger:trace("Failed to sanitize script.")
+      return nil, details
+    else
+      Logger:trace("Script source object verified.")
+      return object, nil
+    end
+  end
+
+  -- Otherwise, get a santized version of the source if valid.
+  local source, details = __sanitize(source)
+  if (not source) then
+    Logger:trace("Failed to sanitize script.")
+    return nil, details
+  end
+
+  Logger:trace("Script string verified.")
+  return source, nil
+
+end
+
+--------------------------------------------------------------------------------
+-- __target
+-- @TODO(tullisar): Get target and guid corrected
+--------------------------------------------------------------------------------
+local function __target(target)
+  Logger:trace("Script target is type '%s'.", type(target))
+  return (__toObject(target) or __GLOBAL)
+end
+
+------------------------------------------------------------------------------
+-- __handleError
+-- @TODO(tullisar)
+------------------------------------------------------------------------------
+local function __handleError(message)
+
+  -- @TODO(tulisar) ressurect line number checking once this all works
+  -- local line = match(result, "chunk_%d+:%((%d+)")
+  -- local lines = split(task.script)
+  -- details = lines[tonumber(lineNumber)]
+
+  message = __tostring(message)
+  Logger:error(message)
+  return message
+end
+
+------------------------------------------------------------------------------
+-- __onComplete
+-- @TODO(tullisar)
+------------------------------------------------------------------------------
+local function __onComplete(success, result, details, onComplete)
+  if (success) then
+    Logger:info("Script executed successfully.")
+  else
+    Logger:error("Script execution failed: ")
+    Logger:error("Result: " .. __tostring(result))
+    Logger:error("Details: " .. __tostring(details))
+  end
+
+  -- If the callback was specified, then dispatch it and pass the results
+  -- to the user specified callback.
+  if (type(onComplete) == "function") then
+    Wait.frames(|| onComplete(success, results, details), 1)
+  end
+
+end
+
+--------------------------------------------------------------------------------
+-- Script execution worker
+--------------------------------------------------------------------------------
+local Worker  =
+{
+  HOST_GUID       = self.guid,
+  UID_FORMAT      = "Scripts.Worker.%s.%d",
+  DEFAULT_TIMEOUT = 45,
+  STATE           = table.immutable(
+  { --
+    NOT_RUNNABLE     = -2,
+    FAILED           = -1,
+    NEW              = 0,
+    UNSANITIZED      = 1,
+    FORMATTING       = 2,
+    SETUP            = 3,
+    READY            = 4,
+    RUNNING_SETUP    = 5,
+    RUNNING_EXECUTE  = 6,
+    RUNNING_FINALIZE = 7,
+    RUNNING_DONE     = 8,
+    COMPLETE         = 9,
+  }),
+  SCRIPTS            = {},
+}
+
+Worker.SCRIPTS.XPCALL = [[-- BEGIN PROTECTED SCRIPT --
+do
+  ------------------------------------------------------------------------------
+  -- Local Environment Setup
+  ------------------------------------------------------------------------------
+  local getmetatable, setmetatable, table = _G.getmetatable, _G.setmetatable, _G.table
+  local pcall, xpcall, type, tostring = _G.pcall, _G.xpcall, _G.type, _G.tostring
+
+  -- String formatter
+  local function __toString(value)
+    local success, str = pcall(|| logString(value))
+    return ((success and str) or "__toString: " .. tostring(str))
+  end
+
+  -- Error handler
+  local function __error(message)
+    return __toString(message)
+  end
+
+  ------------------------------------------------------------------------------
+  -- Protected Environment Setup
+  -- @TODO(tullisar): Is there a way to prevent modification of existing global
+  -- environment items?
+  ------------------------------------------------------------------------------
+  local function __setup()
+    local STATE =
+    {
+      ENVIRONMENT    = _ENV,
+      ENVIRONMENT_MT = getmetatable(_ENV),
+      GLOBAL         = _G,
+      GLOBAL_MT      = getmetatable(_G),
+      SINK           = { a = "B"},
+      PUBLIC         = {}
+    };
+
+    local PUBLIC = STATE.PUBLIC;
+    function PUBLIC.__index(t,k)
+      local v = PUBLIC[k]
+      if (v == nil) then
+        v = STATE.SINK[k]
+      end
+      return v
+    end
+
+    function PUBLIC.__newindex(t,k,v)
+      STATE.SINK[k] = v
+    end
+
+    setmetatable(_ENV, PUBLIC)
+    setmetatable(_G, PUBLIC)
+  end
+
+  local function __restore()
+    if (STATE.ENVIRONMENT_MT) then setmetatable(_ENV, STATE.ENVIRONMENT_MT) end
+    if (STATE.GLOBAL_MT) then setmetatable(_G, STATE.GLOBAL_MT) end
+  end
+
+  -- Call the setup function
+  local results = table.pack(xpcall(__setup, __error))
+  if (not results[1]) then
+    return results
+  end
+
+  ------------------------------------------------------------------------------
+  -- Execution
+  ------------------------------------------------------------------------------
+  local function __run()
+    %s;                                                                         -- [1] String: Script body
+  end
+
+  results = table.pack(xpcall(__run, __error))
+  __restore()
+  return results
+
+end
+-- END PROTECTED SCRIPT --]]
+
+Worker.SCRIPTS.EXECUTE = [[-- BEGIN WRAPPER --
+do
+  ------------------------------------------------------------------------------
+  -- Environment Setup
+  ------------------------------------------------------------------------------
+  local xpcall, assert = _G.xpcall, _G.assert;
+  local worker = assert(_G["%s"]);                                              -- [1] String: Worker UID
+  assert(worker.state == worker.STATE.RUNNING_SETUP);
+
+  ------------------------------------------------------------------------------
+  -- __handleError
+  ------------------------------------------------------------------------------
+  local function __handleError(message)
+    worker.state  = worker.STATE.FAILED;
+    worker.result = ((type(message) == "string") and message) or
+                    ((type(message) == "table") and "<TABLE>") or
+                    ((type(message) == "userdata") and "<USERDATA>") or
+                    tostring(message);
+    return worker.result;
+  end
+
+  ------------------------------------------------------------------------------
+  -- __script
+  ------------------------------------------------------------------------------
+  local function __script()
+    if (worker.script) then
+      return worker.script;
+    end
+    local object = assert(worker.source and getObjectFromGUID(worker.source));
+    return object.script_code;
+  end
+
+  ------------------------------------------------------------------------------
+  -- __execute
+  ------------------------------------------------------------------------------
+  local function __execute()
+
+    local success, script = xpcall(__script, __handleError);
+    if (not success) then return; end
+
+    script = worker.XPCALL:format(script);
+    local results = table.pack(xpcall(self.executeScript, __handleError, script));
+
+    -- results[1] is "success" from outer xpcall, and results[2] is the error
+    -- message when this call is not successful.
+    if (not results[1]) then
+      worker.result = results[2];
+      return;
+    end
+
+    -- results[2] is "success" from protected script call, and results[3] is the
+    -- error message when that call was not successful.
+    if (not results[2]) then
+      worker.state = worker.STATE.FAILED;
+      worker.result = results[3];
+      return;
+    end
+
+    worker.result = results;
+    worker.state  = worker.STATE.RUNNING_FINALIZE;
+  end
+
+  ------------------------------------------------------------------------------
+  -- Run and execute the script.
+  ------------------------------------------------------------------------------
+  worker.state = worker.STATE.RUNNING_EXECUTE
+  local success, message = xpcall(__execute, __handleError)
+  if (not success) then
+    worker.result = message
+  end
+
+  return
+end
+-- END WRAPPER --]]
+
+--[[--
+Returns a new script worker.
+@function Worker.__new
+--]]
+local workerCount = 0
+function Worker.new(source, target, timeout, onComplete)
+  workerCount = workerCount + 1
+  local worker =
+  {
+    uid         = UID_FORMAT:format(WORKER.HOST_GUID, workerCount),
+    state       = Worker.STATE.NEW ,
+    unsanitized =
+    {
+      source     = source,
+      target     = target,
+      timeout    = timeout,
+      onComplete = onComplete,
+    },
+  }
+  return setmetatable(worker, { __index = Worker })
+end
+
+--[[--
+Sanitizes the arguments that were passed to this worker.
+@function Worker:sanitize
+--]]
+function Worker:sanitize()
+
+  -- Sanitize the source script/object.
+  assert(self.state == Worker.STATE.NEW)
+  self.state = Worker.STATE.UNSANITIZED
+  self.source, self.details = __source(self.unsantized.source)
+  if (not self.source) then
+    self.result = string.format("No script could be run from: '%'", type(self.unsanitized.source))
+    self.state = Worker.STATE.NOT_RUNNABLE
+    return false
+  end
+
+  -- All other sanitizing steps will succeed with default values.
+  self.target = __target(self.unsanitized.target)
+  self.onComplete = ((type(self.unsanitized.onComplete) == "function") or nil)
+  self.timeout = (((type(self.unsanitized.timeout) == "number") and (self.unsanitized.timeout > 0) and self.unsanitized.timeout) or Worker.DEFAULT_TIMEOUT)
+  self.state = Worker.STATE.FORMATTING
+  return true
+
+end
+
+--[[--
+Formats the script for this worker.
+@function Worker:format
+--]]
+function Worker:format()
+  assert(self.state == Worker.STATE.FORMATTING)
+  self.template = Worker.SCRIPTS.EXECUTE:format(self.uid)
+  self.script = (((type(self.source) == "string") and self.source) or nil)
+  self.state = Worker.STATE.SETUP
+  return true
+end
+
+
+--[[--
+Sets up the script worker for execution on the target.
+@function Worker:setup
+--]]
+function Worker:setup()
+  assert(self.state == Worker.STATE.SETUP)
+  assert(self.target.getTable(self.uid) == nil)
+  local success = self.target.setTable(self.uid,
+  {
+    uid    = self.uid,     --
+    state  = Worker.STATE.RUNNING_SETUP,
+    script = self.script,
+    source = self.source,
+    target = self.target.guid,
+    STATE  = table.copy(Worker.STATE),
+    XPCALL = Worker.SCRIPTS.XPCALL
+  })
+
+  if (not success) then
+    self.result = string.format("Unable to set worker table on target object '%s'.", self.target.guid)
+    self.state = Worker.STATE.NOT_RUNNABLE
+    return false
+  end
+
+  self.state = Worker.STATE.READY
+  return true
+end
+
+--[[--
+Executes the script on the target.
+@function Worker:execute
+--]]
+function Worker:execute()
+
+  -- Execute the script on the target object
+  Logger:info("Executing script on '%s'", self.target.guid)
+  assert(self.state == Worker.STATE.READY)
+  self.state = Worker.STATE.RUNNING_EXECUTE
+  local success, message = xpcall(|| self.target.executeScript(self.template), __handleError)
+
+  -- If there was an error in the call to executeScript itself, then consider
+  -- the task as failed and use the error message as the result.
+  if (not success) then
+    self.result = __toString(message)
+    self.state  = Worker.STATE.FAILED
+    return
+  end
+
+  -- Determine the result of the worker on the target object
+  local worker = self.target.getTable(self.uid)
+  if ((not worker) or (type(worker.state) ~= "number")) then
+    self.result = string.format("Unable to retrieve worker table on target object '%s'.", self.target.guid)
+    self.state  = Worker.STATE.FAILED
+    return
+  end
+
+  self.result = worker.result
+  self.state  = worker.state
+
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function Worker:run
+--]]
+function Worker:run()
+  if (not self:sanitize()) then return end
+  if (not self:format()) then return end
+  if (not self:setup()) then return end
+  self:execute()
+end
+
+--------------------------------------------------------------------------------
+-- Public Functions
+--------------------------------------------------------------------------------
+local Future = Futures.Future
+function Scripts.submit(source, target, timeout)
+  local worker = Worker.new(source, target, timeout)
+  local future = Future:builder(|| worker:run())
+end
+
+return Scripts

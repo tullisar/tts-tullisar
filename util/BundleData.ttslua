@@ -1,0 +1,134 @@
+--[[--
+A utility which captures information about the luabundler state for the current
+file. This file should not be used with #include, you must require() it to
+use it. There is no need to explicitly require this file in a module being
+registered to LibraryManager however. If your module uses require() at all,
+then it will have a BundleData object available. For more information, see
+the details in the registerLibraryObject method in LibraryManager.
+
+@module BundleData.ttslua
+@author Rob Bartlett-Schneider / Tullisar
+@version 1.0
+@license TBD
+@copyright 2021 Rob Bartlett-Schneider
+
+--]]
+
+--------------------------------------------------------------------------------
+-- Constants
+--------------------------------------------------------------------------------
+local __GLOBAL_GUID = "Global"
+
+--------------------------------------------------------------------------------
+-- Require dependencies.
+--------------------------------------------------------------------------------
+local __DEBUG = false
+local Logger  = require("tts-tullisar.util.Logger")("BundleData")
+local Strings = require("tts-tullisar.util.Strings"):globalize()
+
+--------------------------------------------------------------------------------
+-- __find
+-- Finds the luabundle version for the given script.
+--------------------------------------------------------------------------------
+local function __find(guid, script)
+  Logger:debug("Reading bundle data from %s...", ((self == Global) and __GLOBAL_GUID) or guid)
+  local version = nil
+  script:forEachLine(
+    function(line) version = line:match("Bundled by luabundle.+(%d+.%d+.%d+)") end,
+    |line| (version ~= nil)
+  ) --
+  return (version ~= nil), version
+end
+
+--------------------------------------------------------------------------------
+-- __spawnDebugObject
+-- Spawns an object with the given lua script.
+--------------------------------------------------------------------------------
+local function __spawnDebugObject(script)
+  spawnObject({
+    type              = "BlockRectangle",
+    scale             = {2,2,2},
+    callback_function = |obj| obj.setLuaScript(script),
+  })
+end
+
+--------------------------------------------------------------------------------
+-- Check the bundle version of the object on which the script is currently
+-- running, or if the global "__BUNDLE_SCRIPT" is defined, the version found
+-- in that script.
+--------------------------------------------------------------------------------
+local script = (__BUNDLE_SCRIPT or self.getLuaScript())
+local guid   = (__BUNDLE_GUID or self.guid)
+local success, isBundled, version = pcall(|| __find(guid, script))
+if (not success) then
+  if (__DEBUG) then __spawnDebugObject(self.getLuaScript()) end
+  Logger:debug("Unable to read bundle data: '%s'.", tostring(isBundled))
+  return {}
+elseif (not isBundled) then
+  Logger:debug("BundleData was not found on this object.")
+  return {}
+end
+
+--------------------------------------------------------------------------------
+-- Bundle data is present. Prepare the bundle data table with the bundle
+-- functions avaialble in the current scope.
+--------------------------------------------------------------------------------
+Logger:debug("Bundle data found, bundled with luabundle version %s.", version)
+local __require   = assert((type(require) == "function") and require)
+local __register  = assert((type(__bundle_register) == "function") and __bundle_register)
+local __loaded    = assert((type(_LOADED) == "table") and _LOADED)
+local __modules   = assert((type(__bundle_modules) == "table") and __bundle_modules)
+Logger:trace("Modules:")
+for k,v in pairs(__modules) do Logger:trace(k) end
+local BundleData = { version = version, guid = self.guid }
+
+--[[--
+Requires a module from this bundle.
+@function BundleData:require
+--]]
+function BundleData:require(name)
+  return __require(name)
+end
+
+--[[--
+Registers module with this bundle.
+@function BundleData:register
+--]]
+function BundleData:register(name, body)
+  __register(name, body)
+end
+
+--[[--
+Returns an iterator of the module name/function body pairs registered to this
+bundle.
+@function BundleData:modules
+--]]
+function BundleData:modules()
+  return pairs(__modules)
+end
+
+--[[--
+Returns an iterator of the loaded identifier/module pairs registered to this
+bundle.
+@function BundleData:loaded
+--]]
+function BundleData:loaded()
+  return pairs(__loaded)
+end
+
+--[[--
+Checks for lua bundle version information on the object with the given GUID.
+You can also pass a reference to the Global object (not a string) to check
+whether the Global script is bundled.
+@function BundleData:checkBundleVersion
+--]]
+function BundleData:isBundled(guid)
+  local object = (((guid == Global) and Global) or getObjectFromGUID(assert((type(guid) == "string") and guid)))
+  if (not object) then
+    Logger:warn("Requested object '%s' does not exist.", guid)
+    return false, nil
+  end
+  return __find(guid, object.getLuaScript())
+end
+
+return BundleData

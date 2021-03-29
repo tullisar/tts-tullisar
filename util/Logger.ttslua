@@ -1,0 +1,129 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+--------------------------------------------------------------------------------
+-- Require dependencies.
+--------------------------------------------------------------------------------
+local Strings = require("tts-tullisar.util.Strings"):globalize()
+
+
+--------------------------------------------------------------------------------
+-- Constants
+--------------------------------------------------------------------------------
+local __DEFAULT_LEVELS =
+{
+  __TRACE = { priority = 100, tag = "TRACE",   color = Color.fromString("Teal") },
+  __DEBUG = { priority = 300, tag = "DEBUG",   color = Color.fromString("Orange") },
+  __INFO  = { priority = 500, tag = "INFO",    color = Color.fromString("Blue") },
+  __WARN  = { priority = 700, tag = "WARNING", color = Color.fromString("Yellow") },
+  __ERROR = { priority = 900, tag = "ERROR",   color = Color.fromString("Red") },
+}
+
+local __DEFAULT_MINIMUM_LEVEL = __DEFAULT_LEVELS.__TRACE
+
+--------------------------------------------------------------------------------
+-- __log
+--------------------------------------------------------------------------------
+local function __log(__Logger, level, message, ...)
+
+  -- If the logged message is a string, and there is at least one or more
+  -- arguments, treat them as format string argumemts.
+  if (type(message) == "string" and (select("#", ...) > 0)) then
+    message = message:format(...)
+  end
+
+  -- Build the output message. If the logged message is a table, then
+  -- log each line of the table individually for better readability.
+  local out = logString(message, "", level.tag, (type(message) ~= "table"), false)
+  local color = string.format("[%s]", level.color:toHex())
+  if (type(message) == "table") then
+    out:forEachLine(|line| print(color .. line))
+  else
+    print(color .. out)
+  end
+
+end
+
+--------------------------------------------------------------------------------
+-- __setup
+-- Initializes the state of a new logger instance.
+--------------------------------------------------------------------------------
+local function __setup(__Logger)
+  local name = __Logger.name
+  __Logger.tags = {}
+
+  -- Initialize the log style and functions for each of the defined tags
+  for k,v in pairs(__DEFAULT_LEVELS) do
+
+    -- Initialize the logger specific level details.
+    local level =
+    {
+      priority = v.priority,
+      tag      = string.lower(v.tag .. "-" .. (name or "default")),
+      prefix   = string.format("[%s]", v.tag) .. ((name and string.format("[%s]", name)) or ""),
+      color    = v.color,
+    }
+
+    -- Add a method to the logger which builds a log string for the given
+    -- message and passes it to the TTS logger.
+    __Logger.levels[k] = level
+    logStyle(level.tag, level.color, level.prefix, nil)
+    __Logger[string.lower(v.tag)] = function(logger, message, ...)
+      if ((logger.minimumLevel) and (logger.minimumLevel.priority <= level.priority)) then
+        __log(logger, level, message, ...)
+      end
+    end
+
+  end
+
+  return __Logger
+end
+
+--------------------------------------------------------------------------------
+-- Default Logger Setup
+--------------------------------------------------------------------------------
+local DefaultLogger = __setup({ levels = {}, minimumLevel = __DEFAULT_MINIMUM_LEVEL })
+
+--------------------------------------------------------------------------------
+-- New Logger Constructor
+--------------------------------------------------------------------------------
+local function __new(name)
+
+  -- If the name is not provided, is the empty string, or consists only of
+  -- whitespace characters, return the default logger.
+  assert((not name) or (type(name) == "string"))
+  if ((not name) or name:isBlank()) then
+    return DefaultLogger
+  end
+
+  local __Logger =
+  {
+    name     = name,
+    levels   = {},
+  }
+
+  -- Create the new logger instance, and apply the log styles.
+  return setmetatable(__setup(__Logger), { __index = DefaultLogger })
+
+end
+
+--------------------------------------------------------------------------------
+-- Set up the default logger's metatable so that it can be called as a function
+-- to create a new logger with a given name.
+--------------------------------------------------------------------------------
+local __metatable =
+{
+  __call     = |_,name| __new(name),
+  __index    = DefaultLogger,
+  __newIndex = |...| error("The default logger cannot be configured this way.")
+}
+
+return setmetatable({}, __metatable)

@@ -1,0 +1,339 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+--------------------------------------------------------------------------------
+-- Dependencies
+--------------------------------------------------------------------------------
+local Tables    = require("tts-tullisar.util.Tables"):globalize()
+local Strings   = require("tts-tullisar.util.Strings"):globalize()
+local Logger    = require("tts-tullisar.util.Logger")("Class")
+local Functions = require("tts-tullisar.util.Functions")
+
+--------------------------------------------------------------------------------
+-- Class API
+--------------------------------------------------------------------------------
+
+local Class
+do
+
+  local Static   = {} --
+  local Meta     = { __index = Static } --
+  Class = setmetatable({}, Meta)
+  local Registry = {}
+
+  --[[--
+  A table of reserved keys and properties. This table also uses an indexing
+  metamethod to reserve names matching certain patterns. Queries to this
+  table will always return a boolean.
+  @table Reserved
+  --]]
+  local Reserved =
+  { --
+    __pattern       = "^___",
+    ["new"]         = true,
+    ["constructor"] = true,
+    ["class"]       = true,
+    ["static"]      = true,
+    ["public"]      = true,
+
+    -- LUA reserved keywords. Not sure if this is overkill, but I don't want
+    -- it to come back cause issues later.
+    ["and"]      = true,
+    ["break"]    = true,
+    ["do"]       = true,
+    ["else"]     = true,
+    ["elseif"]   = true,
+    ["end"]      = true,
+    ["false"]    = true,
+    ["for"]      = true,
+    ["function"] = true,
+    ["goto"]     = true,
+    ["if"]       = true,
+    ["in"]       = true,
+    ["local"]    = true,
+    ["nil"]      = true,
+    ["not"]      = true,
+    ["or"]       = true,
+    ["repeat"]   = true,
+    ["return"]   = true,
+    ["then"]     = true,
+    ["true"]     = true,
+    ["until"]    = true,
+    ["while"]    = true,
+
+  }
+  setmetatable(Reserved,
+  {
+    -- Properties are reserved regardless of case, and for the moment all
+    -- properties that begin with two underscores are reserved for future
+    -- use. Properties that begin with only one or two underscores will never
+    -- be treated as reserved by this module.
+    __index = function(_, property) --
+      return
+      (
+        string.isString(property) and
+        (
+          (rawget(Reserved, property:lower()) == true) or --
+          (property:match(Reserved.__pattern) ~= nil)
+        )
+      )
+    end
+  })
+  table.immutable(Reserved)
+
+  ------------------------------------------------------------------------------
+  -- A registry of all classes created by this module. Once created, a class
+  -- type exists for the life of the scripting environment in which this module
+  -- exists.
+  ------------------------------------------------------------------------------
+  do
+
+    Registry.classes = --
+    {
+      byName     = {},
+    }
+
+    Registry.info =
+    {
+      byName  = {},
+      byClass = {},
+    }
+
+    Registry.meta =
+    {
+      byClass = {},
+    }
+
+    ----------------------------------------------------------------------------
+    -- __setClassProperty
+    -- This is sued as the __newindex metamethod for a class type.
+    ----------------------------------------------------------------------------
+    local function __setClassProperty(class, property, value)
+      Logger:trace("Attempting to set class property '%s=%s'...", tostring(property), type(value))
+      local info = Registry:infoByClass(class)
+      assert((not rawequal(class, value)), "Class cannot have a reference to itself")
+      string.assertIsString(property, "Only string class properties are allowed.")
+      Logger:trace("Checking reserved properties...")
+      if (property == "new") then
+        Logger:trace("Installing constructor....")
+        assert(info.constructor == nil, "Constructor already exists.")
+        info.constructor = Functions:assertIsCallable(value, "Constructor must be callable.")
+        Logger:trace("Constructor installed...")
+        return
+      else
+        assert(((Static[property] == nil) and (info.static[property] == nil)), "Cannot shadow a static property.")
+        Logger:trace("Setting public property.")
+        assert((not Reserved[property]), string.format("Cannot use reserved property '%s'.", property))
+        info.public[property] = value
+        Logger:trace("Property set.")
+        return
+      end
+    end
+
+    ----------------------------------------------------------------------------
+    -- __getClassProperty
+    -- This is used as the __index metamethod for a class type.
+    ----------------------------------------------------------------------------
+    local function __getClassProperty(class, property)
+      Logger:trace("Attempting to get class property...")
+      local info = Registry:infoByClass(class)
+      string.assertIsString(property, "Only string class properties are allowed.")
+      if (property:lower() == "static") then return info.static end
+      if (Reserved[property] ~= nil) then return nil end
+      if (Static[property] ~= nil) then return Static[property] end
+      if (info.static[property] ~= nil) then return info.static[property] end
+      return info.public[property]
+    end
+
+    ----------------------------------------------------------------------------
+    -- __classForInstance
+    ----------------------------------------------------------------------------
+    local function __classForInstance(instance, quiet)
+      local meta = assert((type(instance) == "table") and getmetatable(instance))
+      local class = meta.__class
+      local info = Registry:infoByClass(class, quiet)
+      return ((info ~= nil) and class), info
+    end
+
+
+    --[[--
+    Creats a new class in this registry and returns the "class" table, it's
+    information table, and its metatable.
+    @function Registry:new
+    --]]
+    function Registry:new(name)
+
+      Logger:trace("Registering new class '%s'....", tostring(name))
+      string.assertIsString(name, "Class name must be a string.")
+      assert(not name:isBlank())
+      assert(not self:classByName(name))
+
+      local class = {}
+
+      local meta  =
+      {
+        __index    = __getClassProperty,
+        __newindex = __setClassProperty
+      }
+
+      local info =
+      {
+        name   = name,
+        static = {},
+        public =
+        {
+          class = __classForInstance
+        }
+      }
+
+      setmetatable(class, meta)
+      self.classes.byName[name] = class
+      self.info.byName[name]    = info
+      self.info.byClass[class]  = info
+      self.meta.byClass[class]  = meta    -- TODO(tullisar): Needed?
+
+      return class, meta, info
+
+    end
+
+    --[[--
+    Finds class information by class table.
+    @function Registry:infoByClass
+    --]]
+    function Registry:infoByClass(class, quiet)
+      local info = self.info.byClass[class]
+      assert((info ~= nil) or quiet)
+      return info
+    end
+
+    --[[--
+    @TODO(tullisar)
+    <summary>
+    <description>
+    @function <function>
+    --]]
+    function Registry:forInstance(instance, quiet)
+      return __classForInstance(instance, quiet)
+    end
+
+    --[[--
+    Returns a class by the given name,
+    @function Registry:classByName
+    --]]
+    function Registry:classByName(name)
+      return self.classes.byName[name]
+    end
+
+  end
+
+  ------------------------------------------------------------------------------
+  -- __setInstanceProperty
+  -- Sets a value on an instance of the class.
+  ------------------------------------------------------------------------------
+  local function __setInstanceProperty(instance, property, value)
+    Logger:trace("Setting instance property '%s=%s'...", tostring(property), type(value))
+    local class, info = Registry:forInstance(instance)
+    assert((class ~= nil) and (property ~= nil))
+    assert(((Static[property] == nil) and (info.static[property] == nil)), "Cannot shadow a static property.")
+    assert(not Reserved[property], "Cannot set a reserved property.")
+    local public = info.public[property]
+    assert((public == nil) or (type(public) == type(value)), "Cannot change type of a public class property.")
+    instance[property] = value
+  end
+
+  ------------------------------------------------------------------------------
+  -- __getInstanceProperty
+  -- This is used as the __index metamethod for a class instance.
+  ------------------------------------------------------------------------------
+  local function __getInstanceProperty(instance, property)
+    Logger:trace("Getting instnace property '%s'.", tostring(property))
+    local class, info = Registry:forInstance(instance)
+    assert((class ~= nil) and (property ~= nil))
+    return info.public[property]
+  end
+
+  ------------------------------------------------------------------------------
+  -- __newInstance
+  -- Returns a new instance of the given class.
+  ------------------------------------------------------------------------------
+  local function __newInstance(class, ...)
+    local info = Registry:infoByClass(class)
+    Logger:trace("Instantiating new instance of class '%s'.", info.name)
+    Functions:assertIsCallable(info.constructor, "No constructor defined!")
+    local instance = setmetatable({},
+    {
+      __index    = __getInstanceProperty, --
+      __newindex = __setInstanceProperty,
+      __class    = class,
+    })
+    info.constructor(class, instance, ...)
+    return instance
+  end
+
+  ------------------------------------------------------------------------------
+  -- These methods are 'Static' for all class types created by this module.
+  -- Indexing metamethods check this table first in most circumstances.
+  ------------------------------------------------------------------------------
+
+  --[[--
+  Returns a new class type. The class can optionally be a singleton,
+  @function Static:new
+  --]]
+  function Static:new(name, singleton)
+    Logger:trace("Creating new class '%s'...", tostring(name))
+    local class, meta, info = Registry:new(name)
+    if (not singleton) then
+      meta.__call = __newInstance
+    end
+    return class
+  end
+  Meta.__call = Static.new
+
+  --[[--
+  Determines whether the given value is a "class" created from this module.
+  This class additionally returns the class's info table.
+  @function Class:isClass
+  --]]
+  function Static:isClass(class)
+    local info = Registry:infoByClass(class, true)
+    return (info ~= nil)
+  end
+
+  --[[--
+  Returns the class information table for a class.
+  @function Class:info
+  --]]
+  function Static:info(class)
+    return Registry:infoByClass(class)
+  end
+
+  --[[--
+  Determines if the given value is an instance of any class created by this
+  module, and returns the class information if so.
+  @function Class:forInstance
+  --]]
+  function Static:forInstance(value)
+    return Registry:forInstance(value)
+  end
+
+  --[[--
+  Returns whether the given value is an instance of a provided class.
+  @function Class:isInstance
+  --]]
+  function Static:isInstance(class, instance)
+    local info = Registry:infoByClass(class)
+    local __class, __info = Registry:forInstance(instance, true)
+    return rawequal(class, __class)
+  end
+
+end
+
+return Class

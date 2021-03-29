@@ -1,0 +1,76 @@
+--[[--
+@TODO(tullisar)
+@module Tables.ttslua
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+local Tables = {}
+
+--------------------------------------------------------------------------------
+-- __immutable
+--------------------------------------------------------------------------------
+local function __immutable()
+  error("This table is immutable.")
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function <function>
+--]]
+function Tables:clear(t)
+  setmetatable(t, {})
+  for k,_ in pairs(t) do
+    t[k] = nil
+  end
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function Tables:immutable
+--]]
+function Tables:immutable(t)
+  assert(type(t) == "table")
+  local mt = getmetatable(t)
+  if (mt) then
+    mt.__newIndex = __immutable
+  else
+    mt = { __newIndex = __immutable }
+  end
+  setmetatable(t, mt)
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function Tables:immutableCopy
+--]]
+function Tables:copy(table, immutable)
+  assert(type(table) == "table")
+  local copy = {}
+  for k,v in pairs(table) do
+    copy[k] = v
+  end
+  return (((not immutable) and copy) or self:immutable(copy))
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function Tables:globalize()
+--]]
+function Tables:globalize()
+  _G.table.copy =      |t,i| self:copy(t, i)
+  _G.table.immutable = |t| self:immutable(t)
+  return self
+end
+
+return setmetatable(Tables, { __newIndex = __immutable })

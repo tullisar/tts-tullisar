@@ -1,0 +1,635 @@
+--[[--
+Futures API
+@module Futures
+@author Rob Bartlett-Schneider / Tullisar
+@revision 1.0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+--------------------------------------------------------------------------------
+-- Dependencies
+--------------------------------------------------------------------------------
+local Tables = require("tts-tullisar.util.Tables"):globalize()
+local Class  = require("tts-tullisar.util.Class")
+
+-- Create a new table for the library.
+local Futures =
+{
+  DEFAULT_TIMEOUT = 45,
+}
+
+-- =============================================================================
+-- Local functions
+-- These are not exposed to users of this module.
+-- =============================================================================
+
+--------------------------------------------------------------------------------
+-- Installs bare-bones class features on a given table
+-- Add indexing and call metamethods to the class's metatable (using the
+-- existing metatable if present)
+--------------------------------------------------------------------------------
+local function __class(noConstructor)
+  local class = {}
+  return setmetatable(class, {
+    __index    = class,
+    __call     = ((not noConstructor) and (|c, ...| setmetatable(c:__new(...), c))) or nil,
+    isInstance = (|c, o| (getmetatable(o) == class))
+  })
+end
+
+--------------------------------------------------------------------------------
+-- Returns an iterator that can be used safely over a vararg list, including
+-- all nil values.
+--------------------------------------------------------------------------------
+local function __iterateArgs(...)
+  local iterator = {args = table.pack(...), index = 0}
+  function iterator:next()
+    self.index = self.index + 1
+    if (self.index <= self.args.n) then
+      return self.index, self.args[self.index]
+    end
+    return nil
+  end
+  return setmetatable(iterator, { __call = iterator.next })
+end
+
+-- =============================================================================
+-- Public functions
+-- These are not exposed in any way to users of the Futures library.
+-- =============================================================================
+
+-- =============================================================================
+-- Scheduler API
+-- =============================================================================
+
+local Schedulers
+do
+
+  --[[--
+  A factory of various scheduler implementations.
+  @type Scheduler
+  --]]
+  Schedulers = Class("Futures.Scheduler", true)
+  Futures.Scheduler = Scheduler
+
+  local Task = {}
+  function Task:new(action)
+    __checkIsCallable(action)
+    local task =
+    {
+      action = action
+    }
+    return setmetatable(task, { __index = Task })
+  end
+
+  local Unbounded = Class("Futures.Schedulers.Unbounded")
+  do
+
+    local Pool = {}
+
+    function Pool:new()
+      local p = { count = 0, queue = {}, locked = false }
+      return p
+    end
+
+    function Pool:lock()
+      while self.locked do self.locked = self.locked end
+      return
+    end
+
+    function Pool:unlock()
+      self.locked = false
+    end
+
+    function Pool:drainTo(other)
+      assert(self ~= other)
+      assert(getmetatable(self) == Pool)
+      for i=1,self.count do
+        other:add(self.queue[i])
+        self.queue[i] = nil
+      end
+    end
+
+    function Pool:add(task)
+      assert(task and (getmetatable(task) == Task))
+      self.count = self.count + 1
+      self.queue[i] = Task:copy(task)
+    end
+
+    --[[--
+    @function Unbounded:new
+    --]]
+    function Unbounded:new()
+
+
+
+      local scheduler =
+      {
+        tasks =
+        {
+          waiting   = { count = 0, pool  = {} },
+          pending   = { count = 0, pool  = {} },
+          active    = { count = 0, pool  = {} },
+          finishing = { count = 0, pool  = {} },
+          done      = { count = 0, pool  = {} },
+        }
+      }
+
+      local monitor = { DELAY = 0.1 }
+      function monitor:start()
+        assert(self.id == nil)
+        self.id = Wait.time(|| self:run(), self.DELAY, 0)
+      end
+
+      function monitor:run()
+        assert(self.id ~= nil)
+
+        -- Collect waiting tasks and move them to pending
+        while waiting.locked do end
+        waiting.locked = true
+        for i=1,waiting.count do
+          pending.count = pending.count + 1
+          pending[pending.count + 1] = waiting[i]
+          waiting[i] = nil
+        end
+        waiting.locked = false
+
+        -- Move pending tasks to active tasks by starting them
+        while active.locked do end
+        active.locked = true
+        for i=1,pending.count do
+          active[active.count]
+
+        -- Process done tasks
+
+      end
+
+      return setmetatable(scheduler, _mt)
+    end
+
+    function Unbounded:submit(runnable)
+
+    end
+  end
+
+end
+
+-- =============================================================================
+-- CallbackList API
+-- =============================================================================
+
+--[[--
+Represents a table of callable items.
+@type CallbackList
+--]]
+local CallbackList = __class()
+Futures.CallbackList = CallbackList
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function CallbackList:__new
+--]]
+function CallbackList:__new(...)
+  local callbackList = { __callbacks = {}, __count = 0 }
+  CallbackList.add(callbackList, ...)
+  return callbackList
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function CallbackList:addCallable
+--]]
+function CallbackList:__add(callback)
+  self.__count = self.__count + 1
+  self.__callbacks[self.__count] = Futures.checkIsCallable(callback)
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function CallbackList:add
+--]]
+function CallbackList:add(...)
+  for _,arg in __iterateArgs(...) do
+    if (CallbackList:isInstance(arg)) then
+      arg:forEach(|c| c:__add(arg))
+    elseif (Futures.isCallable(arg)) then
+      self:__add(arg)
+    else
+      __notCallable(arg)
+    end
+  end
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function CallbackList:iterator
+--]]
+function CallbackList:iterator()
+  return ipairs(self.__callbacks)
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function CallbackList:forEach
+--]]
+function CallbackList:forEach(consumer)
+  Futures.checkIsCallable(consumer)
+  if (not self:isEmpty()) then
+    for _,callback in self:iterator() do
+      consumer(callback)
+    end
+  end
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function CallbackList:__call
+--]]
+function CallbackList:__call(...)
+  if (not self:isEmpty()) then
+    for _,callback in self:iterator() do
+      Futures.checkIsCallable(callback)(...)
+    end
+  end
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function CallbackList:isEmpty
+--]]
+function CallbackList:isEmpty()
+  return (self.__count == 0)
+end
+
+--[[---------------------------------------------------------------------------
+@TODO(tullisar)
+<summary>
+<description>
+@type Supplier
+------------------------------------------------------------------------------]]
+Supplier = __class()
+Futures.Supplier = Supplier
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function Supplier:__new
+--]]
+function Supplier:__new(value, isCallable)
+  local supplier = {}
+  if (Supplier:isInstance(value)) then
+    supplier.__get = value.__get
+  elseif (not (Futures.isCallable(value) or isCallable)) then
+    supplier.__get = (|| value)
+  else
+    supplier.__get = value or __notCallable()
+  end
+  return supplier
+end
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@function Supplier:__call
+--]]
+function Supplier:__call(errorHandler, packed)
+  local get
+  if (errorHandler and Futures.isCallable(errorHandler)) then
+    get = || xpcall(|| self.__get(), errorHandler)
+  else
+    get = self.__get
+  end
+  return ((packed and table.pack(get())) or get())
+end
+
+
+--==============================================================================
+-- Future API
+--==============================================================================
+
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@type Future
+--]]
+local Future
+do
+
+  -- Shared metatable index for both Future and Builder class for functions
+  -- that are common to both.
+  local __Shared  = {} --
+
+  -- Future 'class' definition
+  local Future    = {}
+  Future.__index  = Future
+  FutureMT        = { __index = __Shared }
+  setmetatable(Future, FutureMT)
+
+  -- Builder 'class' definition
+  local Builder   = {}
+  Builder.__index = Builder
+  BuilderMT       = { __index = __Shared };
+  setmetatable(Builder, BuilderMT);
+
+  -- Define the possible states a future can be in.
+  local STATE =
+  {
+    EXPIRED     = -3,
+    CANCELLED   = -2,
+    FAILED      = -1,
+    NEW         = 0,
+    READY       = 1,
+    RUNNING     = 2,
+    SUCCESS     = 4,
+  }
+
+  Future.STATE = STATE
+
+  --[[--
+  Returns a new future builder instance.
+  @function Future:builder()
+  --]]
+  function Future:builder(action)
+
+    -- Create a new future to hold the pending result.
+    Futures:checkIsCallable(action)
+    local builder =
+    {
+      __isDone    = false,
+      __action    = action,
+      __timeout   = Futures.DEFAULT_TIMEOUT,
+      __state     = STATE.NEW,
+      __callbacks =
+      {
+        onTimeout = CallbackList(), --
+        onError   = CallbackList(),
+        onSuccess = CallbackList(),
+      }
+    }
+
+    return setmetatable(builder, Builder)
+
+  end
+
+  ------------------------------------------------------------------------------
+  -- Functions shared by Future and Builder
+  ------------------------------------------------------------------------------
+
+  --[[--
+  Registers a callback to run when the future expires while waiting for its result.
+  If this future is already complete and is expired, then the callback(s) will
+  run immediately.
+  @function __Shared:onTimeout
+  @tparam {Runnable,...}|CallbackList
+  --]]
+  function __Shared:onTimeout(...)
+    if (not self.__isDone) then
+      self.__callbacks.onTimeout:add(...)
+    elseif (self.__state == STATE.EXPIRED) then
+      CallbackList(...)()
+    end
+    return self
+  end
+
+  --[[--
+
+  @function __Shared:withTimeout
+  --]]
+  function __Shared:withTimeout(duration)
+    if not self.__isDone then
+      self.__timeout = ((type(duration) == "number") and (duration > 0) and duration) or error("Timeout value must be a number")
+    end
+    return self
+  end
+
+  --[[--
+  Registers one or more callbacks to run when the future encounters an error
+  while attempting to retrieve the result. If this future is already complete
+  and has failed with an error, then the callback(s) will run immediately.    --
+  @function __Shared:onError                                                    --
+  --]]
+  function __Shared:onError(...)
+    if (not self.__isDone) then
+      self.__callbacks.onError:add(...)
+    elseif (self.__state == STATE.ERROR) then
+      CallbackList(...)(self.__result.value)
+    end
+    return self
+  end
+
+  --[[--
+  Registers one or more callbacks to run when this future has completed
+  succesfully. If this future has already successfully completed, then the
+  callback(s) will be run immediately.
+  @function __Shared:onSucces
+  --]]
+  function __Shared:onSuccess(...)
+    if (not self.__isDone) then
+      self.__callbacks.onSuccess:add(...)
+    elseif (self.__state == STATE.SUCCESS) then
+      CallbackList(...)(__result(self))
+    end
+    return self
+  end
+
+  ------------------------------------------------------------------------------
+  -- Builder Functions
+  ------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------
+  -- __result
+  -- Returns the result of this future if it was successful, or raises an error
+  -- if the future is failed, expired, or cancelled.
+  ------------------------------------------------------------------------------
+  function __result(future)
+    local self = assert(future)
+    assert(self.__isDone)
+    if (self.__state == STATE.SUCCESS) then
+      local count = future.__results.count
+      local value = future.__results.value
+      return ((count == 1) and value) or
+             ((count > 1) and table.unpack(value, 2, (count + 1))) or nil
+    end
+    error(self.__results.value)
+  end
+
+  ------------------------------------------------------------------------------
+  -- __run
+  --
+  -- Executes the given future's action.
+  ------------------------------------------------------------------------------
+  function __run(future)
+    local self = assert(future)
+    if (not self.__isDone) then
+
+      assert(self.__state == STATE.READY)
+      self.__state = STATE.RUNNING
+
+      -- Run the action, catching errors and formatting them as a string to
+      -- be captured in the future's results.
+      local results = table.pack(xpcall(|| self.__action(), logString))
+
+      -- If the future isn't done after finishing the action (because it was
+      -- cancelled or timed out), populate the result appropriately.
+      if (not self.__isDone) then
+        self.__isDone       = true
+        if (results[1]) then
+          self.__result.count = (results.n - 1)
+          self.__result.value = (((self.__result.count > 1) and results) or results[2])
+          self.__state        = STATE.SUCCESS
+          self.__callbacks.onSuccess(__result(self))
+        else
+          self.__result.count = 1
+          self.__result.value = ((results[2] and tostring(results[2])) or "Unexpected error executing action.")
+          self.__state        = STATE.FAILED
+          self.__callbacks.onError(self.__result.value)
+        end
+      end
+    end
+
+  end
+
+  --[[--
+  Builds and returns a new future using the details defined in this builder.
+  @function Builder:build
+  --]]
+  function Builder:build()
+
+    local builder = self
+    local future =
+    {
+      __isDone    = false,
+      __action    = builder.__action,
+      __timeout   = builder.__timeout,
+      __state     = STATE.READY,
+      __callbacks =
+      {
+        onTimeout = CallbackList(builder.__callbacks.onTimeout), --
+        onError   = CallbackList(builder.__callbacks.onError),
+        onSuccess = CallbackList(builder.__callbacks.onSuccess),
+      },
+      __result    = { count = 0 },
+    }
+
+    -- All futures must define :get() method for the result container. Futures
+    -- built from the builder execute the action and then return the result of
+    -- the future. If the future failed as a result of an error, this method
+    -- will re-throw that error.
+    function future.__result:get()
+      __run(future)
+      return __result(future)
+    end
+
+    -- @TODO(tullisar): Make the future's private data immutable.
+    return setmetatable(future, Future)
+
+  end
+
+  ------------------------------------------------------------------------------
+  -- Future Functions
+  ------------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------------
+  -- __expire
+  -- Expires the given future, marking it as timed out, if it hasn't already
+  -- completed.
+  ------------------------------------------------------------------------------
+  local function __expire(future)
+    if (not future.__isDone) then
+      if (future.__waiter) then Wait.stop(future.__waiter) end
+      if (future.__timer) then Wait.stop(future.__timer) end
+      future.__state = STATE.EXPIRED
+      future.__isDone = true
+      future.__result.count = 1
+      future.__result.value = "Timed out while waiting for the result."
+      future.__callbacks.onTimeout(future.__result.value)
+    end
+    return future
+  end
+
+  --[[--
+  Attempts to cancel this future, and prevent it from running if possible.
+  @function Future:cancel
+  --]]
+  function Future:cancel(cancelRunning)
+    if (not self.__isDone) then
+      if ((cancelRunning and (self.__state == STATE.RUNNING)) or (self.__state ~= STATE.RUNNING)) then
+        self.__isDone = true
+        self.__state = STATE.CANCELLED
+      end
+      if (self.__isDone) then
+        self.__state = STATE.CANCELLED
+        if (self.__waiter) then Wait.stop(self.__waiter) end
+        if (self.__timer) then Wait.stop(self.__timer) end
+      end
+    end
+    return (self.__state == STATE.CANCELLED)
+  end
+
+  --[[--
+  Returns whether this future has completed (successfully or otherwise.)
+  @function Future:isDone
+  --]]
+  function Future:isDone()
+    return (self.__isDone == true)
+  end
+
+  --[[--
+  Returns whether this future is failed, either as a result of an error, or
+  because the future expired before the result was ready.
+  @function Future:isFailed
+  --]]
+  function Future:isFailed()
+    return (self.__state < STATE.NEW)
+  end
+
+  --[[--
+  Gets the result of this future, waiting until it becomes available if
+  necessary.
+  @function Future:get
+  --]]
+  function Future:get()
+    -- TODO!!!!
+    return self.__result:get()
+  end
+
+  ------------------------------------------------------------------------------
+  -- __getQuiet
+  -- Used by Future:submit() to query the result of the future and suppress
+  -- errors. The future's appropriate callbacks will be run upon completion.
+  ------------------------------------------------------------------------------
+  function __getQuiet(future)
+    xpcall(|| future:get(), ||_);
+  end
+
+  --[[--
+  Get the result of the future, running it if necessary.
+  @function Future:get
+  --]]
+  function Future:submit()
+    self.__waiter = Wait.frames(|| __run(self), 1)
+    self.__timer  = Wait.condition(||_, || self.__isDone, self.__timeout, || __expire(self))
+    return self
+  end
+
+end
+
+return Futures

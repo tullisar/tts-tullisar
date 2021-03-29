@@ -1,0 +1,86 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+--
+-- local LibraryManager = require("tts-tullisar.LibraryManager")
+--
+-- local waitid = LibraryManager:install()
+
+log("Beginning tests....")
+local _print = print
+local _log   = log
+
+local STATE =
+{
+  ENVIRONMENT    = _ENV,
+  ENVIRONMENT_MT = getmetatable(_ENV),
+  GLOBAL         = _G,
+  GLOBAL_MT      = getmetatable(_G),
+  SINK           = { a = "B"},
+  PUBLIC         = {}
+}
+
+local PUBLIC = STATE.PUBLIC
+function PUBLIC.log(m,t,l)
+  local message = "[LOG]" .. logString(m)
+  _log(message)
+end
+
+function PUBLIC.print(...)
+  local args = table.pack(...)
+  local str = ""
+  for i=1,args.n do
+    str = str .. logString(args[i])
+  end
+  PUBLIC.log(str)
+end
+
+function PUBLIC.__index(t,k)
+  printToAll("Looking up public index. for key: " .. logString(k), Color.GREEN)
+  local v = PUBLIC[k]
+  if (v == nil) then
+    printToAll("Not found, checking sink.")
+    v = STATE.SINK[v]
+  end
+  if (v == nil) then
+    printToAll("Not found.")
+  else
+    printToAll("Found type " .. type(v))
+  end
+  return v
+end
+
+function PUBLIC.__newindex(t,k,v)
+  printToAll("Setting new public index...", Color.GREEN)
+  STATE.SINK[k] = v
+end
+
+setmetatable(_ENV, PUBLIC)
+setmetatable(_G, PUBLIC)
+_G.foo = "BAR"
+_G.log = nil
+
+print("START")
+do
+  log("Executing script...")
+  local results = table.pack(pcall(|| self.executeScript(
+  [[
+    printToAll(tostring(os.time()) .. "HI", Color.GREEN)
+    log(foo)
+    bar = "BAZ"
+    print = |...| print("[_____]", ...)
+  ]]
+  )))
+end
+print("FINISH")
+log(STATE.SINK)
+
+return true

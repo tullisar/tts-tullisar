@@ -1,0 +1,31 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+local Class = require("tts-tullisar.util.Class")
+
+local Ball = Class("Ball")
+
+
+function Ball:new(instance)
+  instance.bounciness = 4
+end
+
+
+function Ball:bounce()
+  for i=1,self.bounciness do
+    print("Bouncy bouncy")
+  end
+end
+
+
+local ball = Ball()
+
+ball:bounce()

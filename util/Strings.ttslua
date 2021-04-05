@@ -26,7 +26,8 @@ end
 @function Strings:assertIsString
 --]]
 function Strings:assertIsString(str, ...)
-  return assert(Strings:isString(str), ...)
+  assert(Strings:isString(str), ...)
+  return str
 end
 
 --[[--

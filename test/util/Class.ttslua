@@ -11,21 +11,75 @@
 
 local Class = require("tts-tullisar.util.Class")
 
-local Ball = Class("Ball")
+function Class:run()
 
+  -- Create a class, successfuly
+  local Ball = Class("Ball")
+  print("Ball is ", tostring(Ball))
 
-function Ball:new(instance)
-  instance.bounciness = 4
-end
-
-
-function Ball:bounce()
-  for i=1,self.bounciness do
-    print("Bouncy bouncy")
+  -- Declare a constructor, which also initializes an instance property
+  function Ball:new(instance)
+    instance.bounciness = 4
   end
+
+  -- Declare a new member function on the class
+  function Ball:bounce()
+    print("I'm bouncing!")
+    local count = self.bounciness
+    assert(type(count) == "number")
+    for i=1,count do
+      print("Bouncy bouncy")
+    end
+    print("Bounding done.")
+  end
+
+  -- Create a new ball instance
+  local ball = Ball()
+  print("ball is ", tostring(ball))
+  ball:bounce()
+  assert(Ball:isInstance(ball), "Unexpected ball type!")
+  assert(Class:forInstance(ball) == Ball)
+  print(logString(Class:info(Ball)))
+
+  -- Static function
+  function Ball.Static:grow(ball, amount)
+    ball.bounciness = ball.bounciness + amount
+  end
+
+  -- Call static function
+  Ball:grow(ball, 10)
+
+  -- Call function again
+  ball:bounce()
+
+  --------------------------------------------------------------------------------
+  -- Test some reserved function names
+  --------------------------------------------------------------------------------
+  local success, message = pcall(function()
+    Ball["FUNction"] = "HI"
+  end)
+  assert((not success))
+  print(message)
+
+  local success, message = pcall(function()
+    Ball["___bar"] = "HI"
+  end)
+  assert((not success))
+  print(message)
+
+  --------------------------------------------------------------------------------
+  -- Try to override public static method
+  --------------------------------------------------------------------------------
+  local success, message = pcall(function()
+    function ball:grow(amount)
+      self.bounciness = self.bounciness + amount
+    end
+  end)
+  assert((not success))
+  print(message)
+
+  print(logString(Ball:info()))
+
 end
 
-
-local ball = Ball()
-
-ball:bounce()
+return Class

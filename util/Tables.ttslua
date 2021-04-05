@@ -30,9 +30,84 @@ function Tables:clear(t)
 end
 
 --[[--
-@TODO(tullisar)
-<summary>
-<description>
+Assert if the first parameter is not a table. Pass other arguments to assert.
+@function Tables:assertIsTable
+--]]
+function Tables:assertIsTable(t, ...)
+  assert(type(t) == "table", ...)
+  return t
+end
+
+--------------------------------------------------------------------------------
+-- Returns an iterator that can be used safely over a vararg list, including
+-- all nil values.
+--------------------------------------------------------------------------------
+local function __iterateArguments(...)
+  local iterator = {args = table.pack(...), index = 0}
+  function iterator:next()
+    self.index = self.index + 1
+    if (self.index <= self.args.n) then
+      return self.index, self.args[self.index]
+    end
+    return nil
+  end
+  return setmetatable(iterator, { __call = iterator.next })
+end
+
+--[[--
+Iterates over all of the arguments in the given argument list and passes them
+to the given consumer function.
+@function Tables:forEachArgument
+--]]
+function Tables:forEachArgument(consumer, ...)
+  assert(type(consumer) == "function")
+  if (select('#', ...) == 0) then return end
+  for _,v in __iterateArguments(...) do
+    consumer(v)
+  end
+end
+
+--[[--
+Iterates over each key/value pair in the given table, and passing them to the
+provided consumer function.
+@function Tables:forEachPair
+--]]
+function Tables:forEachPair(t, consumer)
+  assert(type(t) == "table")
+  assert(type(consumer) == "function")
+  for k,v in pairs(t) do
+    consumer(k, v)
+  end
+end
+
+--[[--
+Iterates over each index in the given table, passing the the index and value
+to he provided consumer function. The table is iterated in a sequence from 1
+to the given number. This iteration will include nil values in the sequence.
+@function Tables:forEachIndex
+--]]
+function Tables:forEachIndex(t, count, consumer)
+  assert(type(t) == "table")
+  assert(type(count) == "number")
+  assert(type(consumer) == "function")
+  for i=1,count do
+    consumer(i, t[i])
+  end
+end
+
+--[[--
+Iterates over each value in the given table, passing the value to the given
+consumer function.
+@function Tables:forEach
+--]]
+function Tables:forEach(t, consumer)
+  assert(type(consumer) == "function")
+  Tables:forEachPair(t, |k,v| consumer(v))
+end
+
+--[[--
+Makes the given table immutable, a new metatable is created for the table if
+one cannot be read.
 @function Tables:immutable
 --]]
 function Tables:immutable(t)
@@ -47,10 +122,8 @@ function Tables:immutable(t)
 end
 
 --[[--
-@TODO(tullisar)
-<summary>
-<description>
-@function Tables:immutableCopy
+Returns a copy of the given table, optionally making it immutable.
+@function Tables:copy
 --]]
 function Tables:copy(table, immutable)
   assert(type(table) == "table")
@@ -62,15 +135,16 @@ function Tables:copy(table, immutable)
 end
 
 --[[--
-@TODO(tullisar)
-<summary>
-<description>
-@function Tables:globalize()
+Returns a copy of the given table which maps the values to keys generated
+by passing each of the values to a transforming function.
+@function Tables:toMap
 --]]
-function Tables:globalize()
-  _G.table.copy =      |t,i| self:copy(t, i)
-  _G.table.immutable = |t| self:immutable(t)
-  return self
+function Tables:indexedBy(t, toIndex)
+  local map = {}
+  Tables:forEachPair(t, function(_, v)
+    map[toIndex(v)] = v
+  end) --
+  return map
 end
 
 return setmetatable(Tables, { __newIndex = __immutable })

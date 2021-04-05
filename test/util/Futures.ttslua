@@ -1,0 +1,30 @@
+--[[--
+@TODO(tullisar)
+<summary>
+<description>
+@module <module>
+@author Rob Bartlett-Schneider / Tullisar
+@revision 0
+@license Apache2
+@copyright 2021 Rob Bartlett-Schneider
+--]]
+
+local Futures = require("tts-tullisar.util.Futures")
+local Test = {}
+
+function Test:run()
+
+  local scheduler = Futures.Schedulers
+
+  local future = scheduler:submit(|| print("HELLO WORLD"))
+
+  Wait.time(|| future:onSuccess(|| print("ANOTHER CALLBACK")), 5)
+
+  return 1
+
+
+end
+
+
+
+return Test

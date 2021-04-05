@@ -12,107 +12,165 @@
 --------------------------------------------------------------------------------
 -- Require dependencies.
 --------------------------------------------------------------------------------
-local Strings = require("tts-tullisar.util.Strings"):globalize()
-
+local Strings = require("tts-tullisar.util.Strings")
+local Tables  = require("tts-tullisar.util.Tables")
 
 --------------------------------------------------------------------------------
 -- Constants
 --------------------------------------------------------------------------------
-local __DEFAULT_LEVELS =
-{
-  __TRACE = { priority = 100, tag = "TRACE",   color = Color.fromString("Teal") },
-  __DEBUG = { priority = 300, tag = "DEBUG",   color = Color.fromString("Orange") },
-  __INFO  = { priority = 500, tag = "INFO",    color = Color.fromString("Blue") },
-  __WARN  = { priority = 700, tag = "WARNING", color = Color.fromString("Yellow") },
-  __ERROR = { priority = 900, tag = "ERROR",   color = Color.fromString("Red") },
-}
+local DEFAULT_LEVELS = Tables:indexedBy(
+{ --
+  { priority = 100, tag = "TRACE",   color = Color.fromString("Teal")   },
+  { priority = 300, tag = "DEBUG",   color = Color.fromString("Orange") },
+  { priority = 500, tag = "INFO",    color = Color.fromString("Blue")   },
+  { priority = 700, tag = "WARNING", color = Color.fromString("Yellow") },
+  { priority = 900, tag = "ERROR",   color = Color.fromString("Red")    },
+}, |level| level.tag )
 
-local __DEFAULT_MINIMUM_LEVEL = __DEFAULT_LEVELS.__TRACE
+local __DEFAULT_MINIMUM_LEVEL = DEFAULT_LEVELS.INFO
+
+-- Format parameters
+-- message
+-- level? default = LOGGER.DEFAULT
+-- withColor default = false
+-- withPrefix default = false
+-- concise? default=(type(message) == table)
+-- formatArgs
+
+
+--------------------------------------------------------------------------------
+-- __format
+-- Formats a string for the logger and the given level.
+--------------------------------------------------------------------------------
+local function __format(logger, level, message, ...)
+
+  -- Initialize parameters
+  local __level    = logger:level(level or logger.minimum or __DEFAULT_MINIMUM_LEVEL)
+  local concise    = (type(message) ~= "table")
+  local withPrefix = (level ~= nil)
+  local withColor  = (level ~= nil)
+  local hasFormat  = ((type(message) == "string") and (select("#", ...) > 0))
+  local formatted  = ""
+
+  -- If the logged message is a string, and there is at least one or more
+  -- arguments, treat them as format string argumemts.
+  if (hasFormat) then
+    Strings:assertIsString(message, "Cannot format a non-string message.")
+    assert(select("#", ...) > 0, "No string format parameters were provided.")
+    formatted = message:format(...)
+  else
+    formatted = message
+  end
+
+  -- Apply the initial formatting pass
+  local tag = ((withPrefix and Strings:assertIsString(__level.tag, "Invalid Level")) or "")
+  formatted = logString(formatted, "", tag, concise, false)
+
+  -- Prefix the output with the formatted color, and apply it to every line
+  -- if concise output isn't desired.
+  if (withColor) then
+    local success, color = pcall(|| string.format("[%s]", level.color:toHex()))
+    assert(success, "Invalid Color.")
+    local colorized = (color .. formatted)
+    if (not concise) then
+      Strings:forEachLine(formatted, function(line) colorized = (color .. line) end)
+    end
+    formatted = colorized
+  end
+
+  return formatted, concise
+
+end
 
 --------------------------------------------------------------------------------
 -- __log
 --------------------------------------------------------------------------------
-local function __log(__Logger, level, message, ...)
-
-  -- If the logged message is a string, and there is at least one or more
-  -- arguments, treat them as format string argumemts.
-  if (type(message) == "string" and (select("#", ...) > 0)) then
-    message = message:format(...)
-  end
-
-  -- Build the output message. If the logged message is a table, then
-  -- log each line of the table individually for better readability.
-  local out = logString(message, "", level.tag, (type(message) ~= "table"), false)
-  local color = string.format("[%s]", level.color:toHex())
-  if (type(message) == "table") then
-    out:forEachLine(|line| print(color .. line))
+local function __log(logger, level, message, ...)
+  local formatted, concise = __format(logger, level, message, ...)
+  if (not concise) then
+    Strings:forEachLine(formatted, |line| print(line))
   else
-    print(color .. out)
+    print(formatted)
   end
+end
 
+--------------------------------------------------------------------------------
+-- __level
+--------------------------------------------------------------------------------
+local function __level(logger, level)
+  local key = (((type(level) == "string") and level) or
+               ((type(level) == "table") and (level.key or level.tag)) or nil)
+  Strings:assertIsString(key, "Invalid level: " .. tostring(key))
+  level = logger.levels[key]
+  Tables:assertIsTable(level, "Invalid level: " .. tostring(level))
+  return level
+end
+
+--------------------------------------------------------------------------------
+-- __setMinimumLevel
+--------------------------------------------------------------------------------
+local function __setMinimumLevel(logger, level)
+  if (level == nil) then logger.minimum = nil end
+  logger.minimum = __level(logger, level)
 end
 
 --------------------------------------------------------------------------------
 -- __setup
 -- Initializes the state of a new logger instance.
 --------------------------------------------------------------------------------
-local function __setup(__Logger)
-  local name = __Logger.name
-  __Logger.tags = {}
+local function __setup(__name)
+
+  local logger =
+  {
+    name            = Strings:assertIsString(__name),
+    tags            = {},
+    levels          = {},
+    setMinimumLevel = __setMinimumLevel,
+    level           = __level
+  }
 
   -- Initialize the log style and functions for each of the defined tags
-  for k,v in pairs(__DEFAULT_LEVELS) do
+  Tables:forEach(DEFAULT_LEVELS, function(__level)
 
-    -- Initialize the logger specific level details.
     local level =
     {
-      priority = v.priority,
-      tag      = string.lower(v.tag .. "-" .. (name or "default")),
-      prefix   = string.format("[%s]", v.tag) .. ((name and string.format("[%s]", name)) or ""),
-      color    = v.color,
+      key      = __level.tag,
+      priority = __level.priority,
+      tag      = string.lower(logger.name .. "-" .. __level.tag),
+      prefix   = string.format("[%s][%s]", __level.tag, logger.name),
+      color    = __level.color,
     }
+
+    -- Logger helper
+    function level.log(_, message, ...)
+      if ((logger.minimum) and (logger.minimum.priority > level.priority)) then
+        return false
+      end
+      __log(logger, level, message, ...)
+    end
 
     -- Add a method to the logger which builds a log string for the given
     -- message and passes it to the TTS logger.
-    __Logger.levels[k] = level
+    logger.levels[__level.tag] = level
     logStyle(level.tag, level.color, level.prefix, nil)
-    __Logger[string.lower(v.tag)] = function(logger, message, ...)
-      if ((logger.minimumLevel) and (logger.minimumLevel.priority <= level.priority)) then
-        __log(logger, level, message, ...)
-      end
-    end
+    logger[string.lower(__level.tag)] = level.log
 
-  end
+  end) --
 
-  return __Logger
+  logger:setMinimumLevel(__DEFAULT_MINIMUM_LEVEL)
+  return logger
 end
 
 --------------------------------------------------------------------------------
 -- Default Logger Setup
 --------------------------------------------------------------------------------
-local DefaultLogger = __setup({ levels = {}, minimumLevel = __DEFAULT_MINIMUM_LEVEL })
+local DefaultLogger = __setup("System")
 
 --------------------------------------------------------------------------------
 -- New Logger Constructor
 --------------------------------------------------------------------------------
 local function __new(name)
-
-  -- If the name is not provided, is the empty string, or consists only of
-  -- whitespace characters, return the default logger.
-  assert((not name) or (type(name) == "string"))
-  if ((not name) or name:isBlank()) then
-    return DefaultLogger
-  end
-
-  local __Logger =
-  {
-    name     = name,
-    levels   = {},
-  }
-
-  -- Create the new logger instance, and apply the log styles.
-  return setmetatable(__setup(__Logger), { __index = DefaultLogger })
-
+  return setmetatable(__setup(name), { __index = DefaultLogger })
 end
 
 --------------------------------------------------------------------------------

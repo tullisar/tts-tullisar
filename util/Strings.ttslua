@@ -26,7 +26,8 @@ end
 @function Strings:assertIsString
 --]]
 function Strings:assertIsString(str, ...)
-  return assert(Strings:isString(str), ...)
+  assert(Strings:isString(str), ...)
+  return str
 end
 
 --[[--
@@ -87,21 +88,5 @@ function Strings:isBlank(str)
   return ((str == "") or (str:match("^%s+$") ~= nil))
 end
 
---[[--
-Installs functions in this module that are suitable for being called with the
-"string:method()" idiom. This generally applies to functions which accept
-a string as the first argument with the intent to do some operation on that
-string.
-@function String.globalize()
---]]
-function Strings:globalize()
-  _G.string.isString       = |str| Strings:isString(str)
-  _G.string.assertIsString = |str| Strings:assertIsString(str)
-  _G.string.forEachLine    = |str,action,stop| Strings:forEachLine(str,action,stop)
-  _G.string.splitLines     = |str| Strings:splitLines(str)
-  _G.string.trim           = |str| Strings:trim(str)
-  _G.string.isBlank        = |str| Strings:isBlank(str)
-  return self --
-end
 
 return Strings

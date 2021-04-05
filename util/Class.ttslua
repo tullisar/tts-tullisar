@@ -12,10 +12,11 @@
 --------------------------------------------------------------------------------
 -- Dependencies
 --------------------------------------------------------------------------------
-local Tables    = require("tts-tullisar.util.Tables"):globalize()
-local Strings   = require("tts-tullisar.util.Strings"):globalize()
+local Tables    = require("tts-tullisar.util.Tables")
+local Strings   = require("tts-tullisar.util.Strings")
 local Logger    = require("tts-tullisar.util.Logger")("Class")
 local Functions = require("tts-tullisar.util.Functions")
+Logger:setMinimumLevel(Logger.levels.TRACE)
 
 --------------------------------------------------------------------------------
 -- Class API
@@ -24,70 +25,106 @@ local Functions = require("tts-tullisar.util.Functions")
 local Class
 do
 
+  ------------------------------------------------------------------------------
+  -- __argumentString
+  -- Concatenates all of the given arguments to a single comma separated
+  -- string, and converting all elements to strings in the process.
+  ------------------------------------------------------------------------------
+  local function __argumentString(...) --
+    local args = table.pack(...)
+    local argString = ""
+    for i=1,args.n do
+      argString = argString .. tostring(args[i]) .. (((i < args.n) and ",") or "")
+    end
+    return argString
+  end
+
   local Static   = {} --
-  local Meta     = { __index = Static } --
+  local Meta     =
+  {
+    __index = function(_, property)
+      return Static[property]
+    end
+  } --
   Class = setmetatable({}, Meta)
   local Registry = {}
 
-  --[[--
-  A table of reserved keys and properties. This table also uses an indexing
-  metamethod to reserve names matching certain patterns. Queries to this
-  table will always return a boolean.
-  @table Reserved
-  --]]
-  local Reserved =
-  { --
-    __pattern       = "^___",
-    ["new"]         = true,
-    ["constructor"] = true,
-    ["class"]       = true,
-    ["static"]      = true,
-    ["public"]      = true,
+  local Reserved
+  do
 
-    -- LUA reserved keywords. Not sure if this is overkill, but I don't want
-    -- it to come back cause issues later.
-    ["and"]      = true,
-    ["break"]    = true,
-    ["do"]       = true,
-    ["else"]     = true,
-    ["elseif"]   = true,
-    ["end"]      = true,
-    ["false"]    = true,
-    ["for"]      = true,
-    ["function"] = true,
-    ["goto"]     = true,
-    ["if"]       = true,
-    ["in"]       = true,
-    ["local"]    = true,
-    ["nil"]      = true,
-    ["not"]      = true,
-    ["or"]       = true,
-    ["repeat"]   = true,
-    ["return"]   = true,
-    ["then"]     = true,
-    ["true"]     = true,
-    ["until"]    = true,
-    ["while"]    = true,
+    Reserved = {} --
 
-  }
-  setmetatable(Reserved,
-  {
-    -- Properties are reserved regardless of case, and for the moment all
-    -- properties that begin with two underscores are reserved for future
-    -- use. Properties that begin with only one or two underscores will never
-    -- be treated as reserved by this module.
-    __index = function(_, property) --
-      return
-      (
-        string.isString(property) and
-        (
-          (rawget(Reserved, property:lower()) == true) or --
-          (property:match(Reserved.__pattern) ~= nil)
-        )
-      )
+    --[[--
+    A table of reserved keys and properties. This table also uses an indexing
+    metamethod to reserve names matching certain patterns. Queries to this
+    table will always return a boolean.
+    @table Reserved
+    --]]
+    local __reserved =
+    { --
+      ["new"]         = true,
+      ["constructor"] = true,
+      ["class"]       = true,
+      ["static"]      = true,
+      ["public"]      = true,
+      [""]            = true,
+
+      -- LUA reserved keywords. Not sure if this is overkill, but I don't want
+      -- it to come back cause issues later.
+      ["and"]      = true,
+      ["break"]    = true,
+      ["do"]       = true,
+      ["else"]     = true,
+      ["elseif"]   = true,
+      ["end"]      = true,
+      ["false"]    = true,
+      ["for"]      = true,
+      ["function"] = true,
+      ["goto"]     = true,
+      ["if"]       = true,
+      ["in"]       = true,
+      ["local"]    = true,
+      ["nil"]      = true,
+      ["not"]      = true,
+      ["or"]       = true,
+      ["repeat"]   = true,
+      ["return"]   = true,
+      ["then"]     = true,
+      ["true"]     = true,
+      ["until"]    = true,
+      ["while"]    = true,
+
+      -- Globally whitelisted properties
+      ["run"]      = false,
+      ["get"]      = false,
+      ["submit"]   = false,
+    }
+
+    local __pattern = "___"
+
+    --[[--
+    Determines whether the given property is reserved for use.
+    @function Reserved:isReserved()
+    --]]
+    local function __isReserved(property)
+      assert(property ~= nil, "Attempt to access nil property.")
+      local reserved = (((type(property) == "string") and (__reserved[property])) or false)
+      if (reserved == false) then Logger:trace("isReserved(): false|cached") return false end
+      if (reserved == true)  then Logger:trace("isReserved(): true|indexed " .. property) return true end
+      if (__reserved[property:lower()]) then
+        reserved = "true|case"
+      elseif (property:sub(1,3) == __pattern) then
+        reserved = "true|pattern"
+      else
+        reserved = nil
+      end
+      Logger:trace("isReserved(): " .. (reserved or "false"))
+      __reserved[property] = (reserved ~= nil)
+      return (reserved ~= nil)
     end
-  })
-  table.immutable(Reserved)
+    Reserved.isReserved = |_, property| __isReserved(property)
+
+  end
 
   ------------------------------------------------------------------------------
   -- A registry of all classes created by this module. Once created, a class
@@ -117,23 +154,21 @@ do
     -- This is sued as the __newindex metamethod for a class type.
     ----------------------------------------------------------------------------
     local function __setClassProperty(class, property, value)
-      Logger:trace("Attempting to set class property '%s=%s'...", tostring(property), type(value))
+      local __p = "[" .. tostring(property) .. "]"
       local info = Registry:infoByClass(class)
+      Logger:trace("Setting " .. info.name .. __p .. "=" .. type(value) ..  "...")
+      Strings:assertIsString(property, "Only string class properties are allowed.")
+      assert((property == "new") or (not Reserved:isReserved(property)), "Cannot used reserved property.")
       assert((not rawequal(class, value)), "Class cannot have a reference to itself")
-      string.assertIsString(property, "Only string class properties are allowed.")
-      Logger:trace("Checking reserved properties...")
       if (property == "new") then
-        Logger:trace("Installing constructor....")
         assert(info.constructor == nil, "Constructor already exists.")
         info.constructor = Functions:assertIsCallable(value, "Constructor must be callable.")
-        Logger:trace("Constructor installed...")
+        Logger:trace("Constructor: installed.")
         return
       else
         assert(((Static[property] == nil) and (info.static[property] == nil)), "Cannot shadow a static property.")
-        Logger:trace("Setting public property.")
-        assert((not Reserved[property]), string.format("Cannot use reserved property '%s'.", property))
         info.public[property] = value
-        Logger:trace("Property set.")
+        Logger:trace((type(property) == "function" and "Function: registered.") or "Property: set")
         return
       end
     end
@@ -143,14 +178,30 @@ do
     -- This is used as the __index metamethod for a class type.
     ----------------------------------------------------------------------------
     local function __getClassProperty(class, property)
-      Logger:trace("Attempting to get class property...")
+      Strings:assertIsString(property, "Only string class properties are allowed: " .. type(property))
+      local __p = "[" .. property .. "]"
       local info = Registry:infoByClass(class)
-      string.assertIsString(property, "Only string class properties are allowed.")
-      if (property:lower() == "static") then return info.static end
-      if (Reserved[property] ~= nil) then return nil end
-      if (Static[property] ~= nil) then return Static[property] end
-      if (info.static[property] ~= nil) then return info.static[property] end
-      return info.public[property]
+      if (property == "Static") then return info.static end
+      Logger:trace("Getting " .. info.name .. __p .. "...")
+      local __v = info.public[property]
+      local __s = ((__v ~= nil) and "class") or "not found"
+      if (__v == nil) then
+        if (property:lower() == "static") then
+          __v = info.static
+          __s = "static"
+        elseif (Reserved:isReserved(property)) then
+          __v = nil
+          __s = "reserved"
+        elseif (Static["___" .. property] ~= nil) then
+          __v = Static["___" .. property]
+          __s = "Class.Static"
+        elseif (info.static[property] ~= nil) then
+          __v = info.static[property]
+          __s = "class.static"
+        end
+      end
+      Logger:trace("Value type: " .. type(__v) .. "|" .. __s)
+      return __v
     end
 
     ----------------------------------------------------------------------------
@@ -172,8 +223,8 @@ do
     function Registry:new(name)
 
       Logger:trace("Registering new class '%s'....", tostring(name))
-      string.assertIsString(name, "Class name must be a string.")
-      assert(not name:isBlank())
+      Strings:assertIsString(name, "Class name must be a string.")
+      assert(not Strings:isBlank(name))
       assert(not self:classByName(name))
 
       local class = {}
@@ -181,7 +232,7 @@ do
       local meta  =
       {
         __index    = __getClassProperty,
-        __newindex = __setClassProperty
+        __newindex = |t,k,v| __setClassProperty(t,k,v)
       }
 
       local info =
@@ -235,103 +286,138 @@ do
   end
 
   ------------------------------------------------------------------------------
-  -- __setInstanceProperty
-  -- Sets a value on an instance of the class.
+  -- Static methods/properties shared between the "Class" type, and all class
+  -- types created by this module. Functions which are assigned to Static
+  -- with "___funcName" can be called as methods on class types created from
+  -- this module.
   ------------------------------------------------------------------------------
-  local function __setInstanceProperty(instance, property, value)
-    Logger:trace("Setting instance property '%s=%s'...", tostring(property), type(value))
-    local class, info = Registry:forInstance(instance)
-    assert((class ~= nil) and (property ~= nil))
-    assert(((Static[property] == nil) and (info.static[property] == nil)), "Cannot shadow a static property.")
-    assert(not Reserved[property], "Cannot set a reserved property.")
-    local public = info.public[property]
-    assert((public == nil) or (type(public) == type(value)), "Cannot change type of a public class property.")
-    instance[property] = value
-  end
+  do
 
-  ------------------------------------------------------------------------------
-  -- __getInstanceProperty
-  -- This is used as the __index metamethod for a class instance.
-  ------------------------------------------------------------------------------
-  local function __getInstanceProperty(instance, property)
-    Logger:trace("Getting instnace property '%s'.", tostring(property))
-    local class, info = Registry:forInstance(instance)
-    assert((class ~= nil) and (property ~= nil))
-    return info.public[property]
-  end
-
-  ------------------------------------------------------------------------------
-  -- __newInstance
-  -- Returns a new instance of the given class.
-  ------------------------------------------------------------------------------
-  local function __newInstance(class, ...)
-    local info = Registry:infoByClass(class)
-    Logger:trace("Instantiating new instance of class '%s'.", info.name)
-    Functions:assertIsCallable(info.constructor, "No constructor defined!")
-    local instance = setmetatable({},
-    {
-      __index    = __getInstanceProperty, --
-      __newindex = __setInstanceProperty,
-      __class    = class,
-    })
-    info.constructor(class, instance, ...)
-    return instance
-  end
-
-  ------------------------------------------------------------------------------
-  -- These methods are 'Static' for all class types created by this module.
-  -- Indexing metamethods check this table first in most circumstances.
-  ------------------------------------------------------------------------------
-
-  --[[--
-  Returns a new class type. The class can optionally be a singleton,
-  @function Static:new
-  --]]
-  function Static:new(name, singleton)
-    Logger:trace("Creating new class '%s'...", tostring(name))
-    local class, meta, info = Registry:new(name)
-    if (not singleton) then
-      meta.__call = __newInstance
+    ----------------------------------------------------------------------------
+    -- __setInstanceProperty
+    -- Sets a value on an instance of the class.
+    ----------------------------------------------------------------------------
+    local function __setInstanceProperty(instance, property, value) --
+      Logger:trace("Setting instance property '%s=%s'...", tostring(property), type(value))
+      local class, info = Registry:forInstance(instance)
+      assert((class ~= nil) and (property ~= nil))
+      assert(((Static[property] == nil) and (info.static[property] == nil)), "Cannot shadow a static property.")
+      assert(not Reserved[property], "Cannot set a reserved property.")
+      local public = info.public[property]
+      assert((public == nil) or (type(public) == type(value)), "Cannot change type of a public class property.")
+      rawset(instance, property, value)
     end
-    return class
-  end
-  Meta.__call = Static.new
 
-  --[[--
-  Determines whether the given value is a "class" created from this module.
-  This class additionally returns the class's info table.
-  @function Class:isClass
-  --]]
-  function Static:isClass(class)
-    local info = Registry:infoByClass(class, true)
-    return (info ~= nil)
-  end
+    ----------------------------------------------------------------------------
+    -- __getInstanceProperty
+    -- This is used as the __index metamethod for a class instance.
+    ----------------------------------------------------------------------------
+    local function __getInstanceProperty(instance, property)
+      local class, info = Registry:forInstance(instance)
+      assert((class ~= nil) and (property ~= nil), "Unable to resolve class property: " .. tostring(property))
+      local value = info.public[property]
+      Logger:trace("%s.%s=%s", info.name, tostring(property), tostring(value))
+      return value
+    end
 
-  --[[--
-  Returns the class information table for a class.
-  @function Class:info
-  --]]
-  function Static:info(class)
-    return Registry:infoByClass(class)
-  end
+    ----------------------------------------------------------------------------
+    -- __newInstance
+    -- Returns a new instance of the given class.
+    ----------------------------------------------------------------------------
+    local function __newInstance(class, ...)
+      local info = Registry:infoByClass(class)
+      Logger:trace(string.format("%s:new(%s)", info.name, __argumentString(...)))
+      Functions:assertIsCallable(info.constructor, "No constructor defined!")
+      local instance = setmetatable({},
+      {
+        __index    = __getInstanceProperty, --
+        __newindex = __setInstanceProperty,
+        __class    = class,
+      })
+      info.constructor(class, instance, ...)
+      return instance
+    end
 
-  --[[--
-  Determines if the given value is an instance of any class created by this
-  module, and returns the class information if so.
-  @function Class:forInstance
-  --]]
-  function Static:forInstance(value)
-    return Registry:forInstance(value)
-  end
+    ----------------------------------------------------------------------------
+    -- __newClass
+    ----------------------------------------------------------------------------
+    local function __newClass(name, singleton)
+      Logger:trace("Class.new(): " .. tostring(name))
+      local class, meta, info = Registry:new(name)
+      if (not singleton) then
+        meta.__call = __newInstance
+      end
+      return class
+    end
 
-  --[[--
-  Returns whether the given value is an instance of a provided class.
-  @function Class:isInstance
-  --]]
-  function Static:isInstance(class, instance)
-    local info = Registry:infoByClass(class)
-    local __class, __info = Registry:forInstance(instance, true)
-    return rawequal(class, __class)
+    --[[--
+    Returns a new class type with the given name.
+    @function Class:new
+    --]]
+    Static.new = |_, n, s| __newClass(n, s)
+    Meta.__call = Static.new
+
+    ----------------------------------------------------------------------------
+    -- __isClass
+    -- Free function helper for Static.isClass (see below).
+    ----------------------------------------------------------------------------
+    local function __isClass(class)
+      local info = Registry:infoByClass(class, true)
+      return (info ~= nil)
+    end
+
+    --[[--
+    Determines if given value is a class type created by this module.
+    @function Class:isClass
+    --]]
+    Static.isClass = |_, c| __isClass(c)
+
+    ----------------------------------------------------------------------------
+    -- __info
+    -- Free function helper for Static.info (see below).
+    ----------------------------------------------------------------------------
+    local function __info(class)
+      return Registry:infoByClass(class)
+    end
+
+    --[[--
+    Returns the class information table for a class. This method is also
+    callable on all class types created from this module (as class:info()).
+    @function Class:info
+    --]]
+    Static.info   = |_, c| __info(c)
+    Static.___info = __info
+
+    ----------------------------------------------------------------------------
+    -- __forInstance
+    -- Free function helper for Static.forInstance (see below).
+    ----------------------------------------------------------------------------
+    local function __forInstance(instance)
+      return Registry:forInstance(instance)
+    end
+
+    --[[--
+    Determines if the given value is an instance of any class created by this
+    module, and returns the class information if so.
+    @function Class:forInstance
+    --]]
+    Static.forInstance = |_, i| __forInstance(i)
+
+    ----------------------------------------------------------------------------
+    -- __isInstance
+    ----------------------------------------------------------------------------
+    local function __isInstance(class, instance)
+      local info = Registry:infoByClass(class)
+      local __class, __info = Registry:forInstance(instance, true)
+      return rawequal(class, __class)
+    end
+
+    --[[--
+    Returns whether the given value is an instance of a provided class.
+    @function Class:isInstance
+    --]]
+    Static.isInstance = |_,c,i| __isInstance(c, i)
+    Static.___isInstance = __isInstance
   end
 
 end
